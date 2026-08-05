@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>けんちくタワービルド</title>
+    <!-- Matter.js 物理ライブラリ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+    <!-- CSS読み込み -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="info">
+    🏗️ <b>けんちくタワービルド</b> | 操作: <b>クリック</b>で落下 / <b>ホイール回転</b>で30度づつ回転 / <b>[R]キー</b>でリセット / <b>[A]+[C] 3秒長押し</b>でハイスコア消去
+</div>
+
+<div id="game-layout">
+    <!-- 左パネル：スコア ＆ ランキング -->
+    <div class="side-panel">
+        <div class="ui-card">
+            <h3>SCORE</h3>
+            <div id="score" class="score-num">0</div>
+            <div class="stat-detail">
+                高さ: <span id="stat-height" style="color:#fff;">0</span>px<br>
+                総重量: <span id="stat-weight" style="color:#fff;">0</span>kg
+            </div>
+        </div>
+
+        <div class="ui-card">
+            <h3>BEST RANKING</h3>
+            <ol id="ranking-list" class="ranking-list"></ol>
+        </div>
+    </div>
+
+    <!-- 中央：物理メイン画面 -->
+    <div id="main-canvas-container">
+        <div id="reset-progress-container">
+            <div id="reset-text">スコアリセット中... [A]+[C]長押し (3秒)</div>
+            <div style="background:#333; border-radius:4px; overflow:hidden;">
+                <div id="reset-progress-bar"></div>
+            </div>
+        </div>
+
+        <div id="game-over-screen">
+            <h1 id="game-over-title">GAME OVER</h1>
+            <p id="game-over-msg">床から落下しました！</p>
+            <p>FINAL SCORE: <span id="final-score" style="color: #f39c12; font-weight: bold;">0</span></p>
+            <button class="retry-btn" onclick="location.reload()">[R] リトライ</button>
+        </div>
+    </div>
+
+    <!-- 右パネル：NEXT & 重量・応力ガイド -->
+    <div class="side-panel">
+        <div class="ui-card">
+            <h3>NEXT</h3>
+            <canvas id="next-canvas" width="100" height="100"></canvas>
+        </div>
+
+        <div class="ui-card">
+            <h3>重量目安 (軽 ➔ 重)</h3>
+            <div class="weight-item">
+                <span class="weight-badge" style="background:#c49a6c;"></span>
+                <span>ダンボール</span>
+                <span style="color:#aaa;">軽量</span>
+            </div>
+            <div class="weight-item">
+                <span class="weight-badge" style="background:#8b5a2b;"></span>
+                <span>木材資材</span>
+                <span style="color:#aaa;">軽量</span>
+            </div>
+            <div class="weight-item">
+                <span class="weight-badge" style="background:#95a5a6;"></span>
+                <span>テトラ</span>
+                <span style="color:#aaa;">軽量</span>
+            </div>
+            <div class="weight-item">
+                <span class="weight-badge" style="background:#f1c40f;"></span>
+                <span>ロードローラー</span>
+                <span style="color:#e74c3c; font-weight:bold;">重量級</span>
+            </div>
+
+            <div class="stress-section">
+                <div class="stress-title">床の応力状態</div>
+                <div class="stress-legend">
+                    <span>安全</span>
+                    <div class="stress-bar-bg"></div>
+                    <span>限界</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript読み込み -->
+<script src="script.js"></script>
+
+</body>
+</html>
