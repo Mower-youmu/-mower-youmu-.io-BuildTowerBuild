@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.0';
+const JS_VERSION = 'v1.0.1';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -842,8 +842,8 @@ function triggerSelfDestructGameOver() {
     if (gameMode === 'multi') {
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
-        document.getElementById('game-over-title').textContent = amILoser ? 'LOSE...' : 'WIN!!';
-        document.getElementById('game-over-msg').textContent = amILoser ? '自滅は許されません！あなたの負けです。' : '相手が自滅したため、あなたの勝利です！';
+        document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
+        document.getElementById('game-over-msg').textContent = amILoser ? 'スコア確定させる為に自滅する。これ、恥ずかしいですからね' : '隣が自滅したのでね、やらないようにしましょう';
 
         if (p2pConn && p2pConn.open && isHost) {
             p2pConn.send({ type: 'game_over', selfDestruct: true, loser: loser });
@@ -864,15 +864,15 @@ function triggerGameOver() {
     if (gameMode === 'multi') {
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
-        document.getElementById('game-over-title').textContent = amILoser ? 'LOSE...' : 'WIN!!';
-        document.getElementById('game-over-msg').textContent = amILoser ? 'タワーを崩壊させてしまいました！' : '相手がタワーを崩壊させました！あなたの勝利です！';
+        document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
+        document.getElementById('game-over-msg').textContent = amILoser ? '負け犬' : '人生の勝利者';
 
         if (p2pConn && p2pConn.open && isHost) {
             p2pConn.send({ type: 'game_over', selfDestruct: false, loser: loser, finalScore: currentScore });
         }
     } else {
-        document.getElementById('game-over-title').textContent = 'GAME OVER';
-        document.getElementById('game-over-msg').textContent = '崩壊しました';
+        document.getElementById('game-over-title').textContent = '負け犬';
+        document.getElementById('game-over-msg').textContent = 'Dead Parrot';
         addScoreToRanking(currentScore);
     }
 
@@ -886,13 +886,13 @@ function handleRemoteGameOver(data) {
     clearInterval(turnTimer);
 
     const amILoser = (data.loser === 'host' && isHost) || (data.loser === 'guest' && !isHost);
-    document.getElementById('game-over-title').textContent = amILoser ? 'LOSE...' : 'WIN!!';
+    document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
     
     if (data.selfDestruct) {
-        document.getElementById('game-over-msg').textContent = amILoser ? '自滅は許されません！あなたの負けです。' : '相手が自滅したため、あなたの勝利です！';
+        document.getElementById('game-over-msg').textContent = amILoser ? 'スコア確定させる為に自滅する。これ、恥ずかしいですからね' : '隣が自滅したのでね、やらないようにしましょう';
         document.getElementById('final-score').textContent = '0';
     } else {
-        document.getElementById('game-over-msg').textContent = amILoser ? 'タワーを崩壊させてしまいました！' : '相手がタワーを崩壊させました！あなたの勝利です！';
+        document.getElementById('game-over-msg').textContent = amILoser ? '負け犬' : '人生の勝利者';
         document.getElementById('final-score').textContent = data.finalScore || currentScore;
     }
 
