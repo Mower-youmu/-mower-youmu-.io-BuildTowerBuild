@@ -272,12 +272,15 @@ function handleP2PMessage(data) {
         gameMode = 'multi';
         nextType = data.nextType;
         currentTurn = data.turn;
+        canDrop = (currentTurn === 'guest');
         drawNextPreview();
         showGameView();
         initPhysics();
         updateTurnUI();
     } else if (data.type === 'sync_state') {
-        if (!isHost) applyRemoteState(data);
+        if (!isHost) {
+            applyRemoteState(data);
+        }
     } else if (data.type === 'cursor') {
         remoteMouseX = data.x;
         remoteAngle = data.angle;
@@ -289,9 +292,12 @@ function handleP2PMessage(data) {
     } else if (data.type === 'turn_change') {
         currentTurn = data.turn;
         nextType = data.nextType;
+        canDrop = isMyTurn(); // ★手番が回ってきたら確実に投下可能に復帰
         drawNextPreview();
         updateTurnUI();
         startTurnTimer();
+    } else if (data.type === 'timer_sync') {
+        document.getElementById('turn-timer-sec').textContent = data.sec;
     } else if (data.type === 'game_over') {
         handleRemoteGameOver(data);
     }
@@ -334,6 +340,10 @@ function startTurnTimer() {
         remainingSec--;
         document.getElementById('turn-timer-sec').textContent = remainingSec;
 
+        if (p2pConn && p2pConn.open) {
+            p2pConn.send({ type: 'timer_sync', sec: remainingSec });
+        }
+
         if (remainingSec <= 0) {
             clearInterval(turnTimer);
             if (canDrop) {
@@ -348,6 +358,7 @@ function startTurnTimer() {
 function switchTurn() {
     currentTurn = (currentTurn === 'host') ? 'guest' : 'host';
     nextType = getRandomType();
+    canDrop = isMyTurn(); // ホスト側も投下可能状態を更新
     drawNextPreview();
     updateTurnUI();
     startTurnTimer();
@@ -364,42 +375,63 @@ function switchTurn() {
 // ==========================================
 // 物理シミュレーション (Matter.js)
 // ==========================================
+let guestCanvas = null;
+let guestCtx = null;
+
 function initPhysics() {
     cleanupPhysics();
 
-    engine = Engine.create();
-    world = engine.world;
-    engine.positionIterations = 15;
-    engine.velocityIterations = 15;
-
     const mainContainer = document.getElementById('main-canvas-container');
-    render = Render.create({
-        element: mainContainer,
-        engine: engine,
-        options: {
-            width: width,
-            height: height,
-            wireframes: false,
-            background: '#87CEEB'
-        }
-    });
-    render.canvas.classList.add('main-cv');
-    Render.run(render);
 
     if (isHost) {
+        // ホスト/ソロ：物理エンジン & レンダラーを稼働
+        engine = Engine.create();
+        world = engine.world;
+        engine.positionIterations = 15;
+        engine.velocityIterations = 15;
+
+        render = Render.create({
+            element: mainContainer,
+            engine: engine,
+            options: {
+                width: width,
+                height: height,
+                wireframes: false,
+                background: '#87CEEB'
+            }
+        });
+        render.canvas.classList.add('main-cv');
+        Render.run(render);
+
         runner = Runner.create();
         Runner.run(runner, engine);
+
+        createBridge();
+        setupPhysicsEvents();
+    } else {
+        // ゲスト：Matter.js は動かさず、軽量な純粋Canvasとして作成
+        guestCanvas = document.createElement('canvas');
+        guestCanvas.width = width;
+        guestCanvas.height = height;
+        guestCanvas.classList.add('main-cv');
+        guestCtx = guestCanvas.getContext('2d');
+        mainContainer.appendChild(guestCanvas);
     }
 
     isGameOver = false;
-    canDrop = true;
+    canDrop = isMyTurn();
     currentActiveBody = null;
     currentScore = 0;
     landedBlocks = [];
+
+    drawNextPreview();
+    setupCanvasInput();
+}
+
+function createBridge() {
     bridgeBodies = [];
     bridgeConstraints = [];
 
-    // ★ 衝突防止グループ設定（確実に板同士の反発を無効化）
     const bridgeGroup = Body.nextGroup ? Body.nextGroup(true) : -1;
 
     for (let i = 0; i < segments; i++) {
@@ -414,7 +446,7 @@ function initPhysics() {
             collisionFilter: { 
                 group: bridgeGroup,
                 category: 0x0002,
-                mask: 0xFFFFFFFF ^ 0x0002 // 板同士の当たり判定を完全除外
+                mask: 0xFFFFFFFF ^ 0x0002
             },
             render: { fillStyle: '#2980b9' }
         });
@@ -434,7 +466,7 @@ function initPhysics() {
             bodyA: bridgeBodies[i],
             bodyB: bridgeBodies[i + 1],
             pointA: { x: segWidth / 2, y: segHeight / 3 },
-            pointB: { x: -segWidth / 2, y: segHeight / 3 },
+            pointB: { x: -segWidth / 2, y: -segHeight / 3 },
             stiffness: 0.99, damping: 0.5, length: 0,
             render: { visible: false }
         });
@@ -467,10 +499,6 @@ function initPhysics() {
     });
 
     Composite.add(world, [...bridgeBodies, ...bridgeConstraints, leftAnchor, rightAnchor, ground]);
-
-    drawNextPreview();
-    setupCanvasInput();
-    setupPhysicsEvents();
 }
 
 function cleanupPhysics() {
@@ -485,14 +513,21 @@ function cleanupPhysics() {
         Engine.clear(engine);
         engine = null;
     }
+    if (guestCanvas) {
+        guestCanvas.remove();
+        guestCanvas = null;
+        guestCtx = null;
+    }
 }
 
 // ==========================================
 // 入力 & 描画イベント
 // ==========================================
 function setupCanvasInput() {
-    render.canvas.addEventListener('mousemove', (e) => {
-        const rect = render.canvas.getBoundingClientRect();
+    const targetCanvas = isHost ? render.canvas : guestCanvas;
+
+    targetCanvas.addEventListener('mousemove', (e) => {
+        const rect = targetCanvas.getBoundingClientRect();
         mouseX = e.clientX - rect.left;
         isMouseInCanvas = true;
 
@@ -501,14 +536,14 @@ function setupCanvasInput() {
         }
     });
 
-    render.canvas.addEventListener('mouseleave', () => {
+    targetCanvas.addEventListener('mouseleave', () => {
         isMouseInCanvas = false;
         if (gameMode === 'multi' && p2pConn && p2pConn.open && isMyTurn()) {
             p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: false });
         }
     });
 
-    render.canvas.addEventListener('wheel', (e) => {
+    targetCanvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         if (!canDrop || isGameOver || !isMyTurn()) return;
 
@@ -520,10 +555,10 @@ function setupCanvasInput() {
         }
     }, { passive: false });
 
-    render.canvas.addEventListener('click', (e) => {
+    targetCanvas.addEventListener('click', (e) => {
         if (isGameOver || !canDrop || !isMyTurn()) return;
 
-        const rect = render.canvas.getBoundingClientRect();
+        const rect = targetCanvas.getBoundingClientRect();
         const dropX = e.clientX - rect.left;
 
         if (gameMode === 'solo' || isHost) {
@@ -561,6 +596,7 @@ function getStressColor(stressRatio) {
 function renderGuides(mainCtx) {
     const def = shapeDefs[nextType];
 
+    // 自分のプレビュー（自分の手番の時）
     if (canDrop && !isGameOver && isMouseInCanvas && isMyTurn()) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -579,11 +615,12 @@ function renderGuides(mainCtx) {
         mainCtx.restore();
     }
 
+    // 相手のプレビュー（相手の手番の時）
     if (gameMode === 'multi' && canDrop && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
         mainCtx.save();
         mainCtx.beginPath();
         mainCtx.setLineDash([4, 4]);
-        mainCtx.strokeStyle = 'rgba(231, 76, 60, 0.5)';
+        mainCtx.strokeStyle = 'rgba(231, 76, 60, 0.6)';
         mainCtx.lineWidth = 2;
         mainCtx.moveTo(remoteMouseX, dropSpawnY);
         mainCtx.lineTo(remoteMouseX, height - 20);
@@ -605,8 +642,6 @@ function setupPhysicsEvents() {
     Events.on(render, 'afterRender', () => {
         renderGuides(render.context);
     });
-
-    if (!isHost) return;
 
     Events.on(engine, 'afterUpdate', () => {
         if (isGameOver) return;
@@ -650,6 +685,7 @@ function setupPhysicsEvents() {
             currentScore = 0;
         }
 
+        // ゲストへ描画データを毎フレーム同期
         if (gameMode === 'multi' && p2pConn && p2pConn.open) {
             const bodiesData = Composite.allBodies(world).map(b => ({
                 label: b.label,
@@ -695,11 +731,13 @@ function setupPhysicsEvents() {
                             landedBlocks.push(currentActiveBody);
                         }
 
-                        canDrop = true;
                         currentActiveBody = null;
 
+                        // 着地成功でターン交代
                         if (gameMode === 'multi') {
                             switchTurn();
+                        } else {
+                            canDrop = true;
                         }
                     }
                 }
@@ -717,31 +755,35 @@ function setupPhysicsEvents() {
     });
 }
 
+// ゲスト側の画面描画同期
 function applyRemoteState(data) {
-    if (!data || !data.bodies) return;
+    if (!guestCtx || !data || !data.bodies) return;
+
     document.getElementById('score').textContent = data.score || 0;
     document.getElementById('stat-height').textContent = data.height || 0;
     document.getElementById('stat-weight').textContent = data.weight || 0;
 
-    const ctx = render.context;
-    ctx.clearRect(0, 0, width, height);
+    // 背景描画
+    guestCtx.fillStyle = '#87CEEB';
+    guestCtx.fillRect(0, 0, width, height);
 
+    // ホストから受信した剛体を描画
     data.bodies.forEach(b => {
         if (!b.vertices || b.vertices.length === 0) return;
-        ctx.beginPath();
-        ctx.moveTo(b.vertices[0].x, b.vertices[0].y);
+        guestCtx.beginPath();
+        guestCtx.moveTo(b.vertices[0].x, b.vertices[0].y);
         for (let j = 1; j < b.vertices.length; j++) {
-            ctx.lineTo(b.vertices[j].x, b.vertices[j].y);
+            guestCtx.lineTo(b.vertices[j].x, b.vertices[j].y);
         }
-        ctx.closePath();
-        ctx.fillStyle = b.color || '#2980b9';
-        ctx.fill();
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        guestCtx.closePath();
+        guestCtx.fillStyle = b.color || '#2980b9';
+        guestCtx.fill();
+        guestCtx.strokeStyle = '#333';
+        guestCtx.lineWidth = 1;
+        guestCtx.stroke();
     });
 
-    renderGuides(ctx);
+    renderGuides(guestCtx);
 }
 
 // ==========================================
