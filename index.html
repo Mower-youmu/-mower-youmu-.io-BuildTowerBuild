@@ -16,6 +16,8 @@
             text-align: center;
             user-select: none;
             overflow-x: hidden;
+            position: relative;
+            min-height: 100vh;
         }
 
         /* タイトル ＆ ロビー画面 */
@@ -446,6 +448,21 @@
             border-radius: 4px;
             background: linear-gradient(to right, #2980b9, #2ecc71, #f1c40f, #e74c3c);
         }
+
+        /* バージョン表記バッジ（右下固定） */
+        #version-badge {
+            position: fixed;
+            bottom: 8px;
+            right: 12px;
+            font-size: 11px;
+            color: #777;
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 3px 8px;
+            border-radius: 4px;
+            pointer-events: none;
+            z-index: 999;
+        }
     </style>
 </head>
 <body>
@@ -527,7 +544,6 @@
     </div>
 
     <div id="game-layout">
-        <!-- 左パネル -->
         <div class="side-panel">
             <div class="ui-card">
                 <h3>SCORE</h3>
@@ -544,7 +560,6 @@
             </div>
         </div>
 
-        <!-- 中央：メイン画面 -->
         <div id="main-canvas-container">
             <div id="turn-timer-display" style="display:none;">残り時間: <span id="turn-timer-sec">15</span>s</div>
 
@@ -564,7 +579,6 @@
             </div>
         </div>
 
-        <!-- 右パネル -->
         <div class="side-panel">
             <div class="ui-card">
                 <h3>NEXT</h3>
@@ -606,6 +620,9 @@
         </div>
     </div>
 </div>
+
+<!-- バージョン表示バッジ -->
+<div id="version-badge">HTML: v1.0.0 / JS: <span id="js-version-display">---</span></div>
 
 <!-- JavaScript読み込み -->
 <script src="script.js"></script>
