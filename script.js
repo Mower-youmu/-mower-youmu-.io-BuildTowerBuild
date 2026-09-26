@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.2';
+const JS_VERSION = 'v1.0.3';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -755,7 +755,6 @@ function setupPhysicsEvents() {
                 blockObj.hasTouched = true;
             }
 
-            // 着地判定
             if (currentActiveBody) {
                 const isCurrent = (bodyA === currentActiveBody || bodyB === currentActiveBody);
                 if (isCurrent) {
@@ -772,7 +771,6 @@ function setupPhysicsEvents() {
                         if (gameMode === 'multi') {
                             switchTurn();
                         } else {
-                            // ★ ソロプレイ時：着地成功で次のブロックを新しく抽選して再描画
                             canDrop = true;
                             nextType = getRandomType();
                             drawNextPreview();
@@ -781,7 +779,6 @@ function setupPhysicsEvents() {
                 }
             }
 
-            // 地面落下判定
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
@@ -842,6 +839,8 @@ function triggerSelfDestructGameOver() {
     if (gameMode === 'multi') {
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
+        
+        // 自滅時：負けた側は負け犬、勝った側は人生の勝利者
         document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
         document.getElementById('game-over-msg').textContent = amILoser ? 'スコア確定させる為に自滅する。これ、恥ずかしいですからね' : '隣が自滅したのでね、やらないようにしましょう';
 
@@ -864,8 +863,10 @@ function triggerGameOver() {
     if (gameMode === 'multi') {
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
-        document.getElementById('game-over-title').textContent = amILoser ? 'Winner!' : 'Dead Parrot';
-        document.getElementById('game-over-msg').textContent = amILoser ? '人生の勝利者' : '負け犬';
+
+        // 崩壊時：崩壊させた側（amILoser = true）が「Dead Parrot（負け犬）」、耐えきった側（amILoser = false）が「Winner!（人生の勝利者）」
+        document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
+        document.getElementById('game-over-msg').textContent = amILoser ? '負け犬' : '人生の勝利者';
 
         if (p2pConn && p2pConn.open && isHost) {
             p2pConn.send({ type: 'game_over', selfDestruct: false, loser: loser, finalScore: currentScore });
@@ -886,6 +887,8 @@ function handleRemoteGameOver(data) {
     clearInterval(turnTimer);
 
     const amILoser = (data.loser === 'host' && isHost) || (data.loser === 'guest' && !isHost);
+    
+    // 受信側（ゲスト）：敗者判定に応じて正しく出し分け
     document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
     
     if (data.selfDestruct) {
