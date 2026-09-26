@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.1';
+const JS_VERSION = 'v1.0.2';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -864,8 +864,8 @@ function triggerGameOver() {
     if (gameMode === 'multi') {
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
-        document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
-        document.getElementById('game-over-msg').textContent = amILoser ? '負け犬' : '人生の勝利者';
+        document.getElementById('game-over-title').textContent = amILoser ? 'Winner!' : 'Dead Parrot';
+        document.getElementById('game-over-msg').textContent = amILoser ? '人生の勝利者' : '負け犬';
 
         if (p2pConn && p2pConn.open && isHost) {
             p2pConn.send({ type: 'game_over', selfDestruct: false, loser: loser, finalScore: currentScore });
