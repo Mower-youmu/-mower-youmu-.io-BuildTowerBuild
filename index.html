@@ -5,86 +5,159 @@
     <title>けんちくタワービルド</title>
     <!-- Matter.js 物理ライブラリ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
+    <!-- PeerJS P2P通信ライブラリ -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <!-- CSS読み込み -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div id="info">
-    🏗️ <b>けんちくタワービルド</b> | 操作: <b>クリック</b>で落下 / <b>ホイール回転</b>で30度づつ回転 / <b>[R]キー</b>でリセット / <b>[A]+[C] 3秒長押し</b>でハイスコア消去
+<!-- スタート画面 -->
+<div id="title-screen">
+    <h1 class="game-title">🏗️ けんちくタワービルド</h1>
+    <p class="subtitle">物理挙動 × 応力シミュレーション パズル</p>
+    <div class="menu-container">
+        <button id="btn-solo" class="menu-btn primary">ソロプレイ</button>
+        <button id="btn-multi" class="menu-btn secondary">マルチ対戦 (P2P)</button>
+        <button id="btn-how" class="menu-btn neutral">遊び方</button>
+    </div>
 </div>
 
-<div id="game-layout">
-    <!-- 左パネル：スコア ＆ ランキング -->
-    <div class="side-panel">
-        <div class="ui-card">
-            <h3>SCORE</h3>
-            <div id="score" class="score-num">0</div>
-            <div class="stat-detail">
-                高さ: <span id="stat-height" style="color:#fff;">0</span>px<br>
-                総重量: <span id="stat-weight" style="color:#fff;">0</span>kg
+<!-- マルチ対戦ロビー -->
+<div id="lobby-screen">
+    <h2>マルチ対戦ロビー (P2P)</h2>
+    <div class="lobby-panels">
+        <div class="lobby-card">
+            <h3>部屋を作る (ホスト)</h3>
+            <p>合言葉を発行して対戦相手を待ちます。</p>
+            <button id="btn-create-room" class="action-btn">部屋を作成</button>
+            <div id="host-id-display" class="room-id-box" style="display:none;">
+                <span>あなたの部屋ID:</span>
+                <b id="my-peer-id">発行中...</b>
+                <p class="hint">この文字列を対戦相手に伝えてください</p>
             </div>
         </div>
-
-        <div class="ui-card">
-            <h3>BEST RANKING</h3>
-            <ol id="ranking-list" class="ranking-list"></ol>
-        </div>
-    </div>
-
-    <!-- 中央：物理メイン画面 -->
-    <div id="main-canvas-container">
-        <div id="reset-progress-container">
-            <div id="reset-text">スコアリセット中... [A]+[C]長押し (3秒)</div>
-            <div style="background:#333; border-radius:4px; overflow:hidden;">
-                <div id="reset-progress-bar"></div>
-            </div>
-        </div>
-
-        <div id="game-over-screen">
-            <h1 id="game-over-title">GAME OVER</h1>
-            <p id="game-over-msg">床から落下しました！</p>
-            <p>FINAL SCORE: <span id="final-score" style="color: #f39c12; font-weight: bold;">0</span></p>
-            <button class="retry-btn" onclick="location.reload()">[R] リトライ</button>
+        <div class="lobby-card">
+            <h3>部屋に入る (ゲスト)</h3>
+            <p>教えてもらった合言葉を入力して接続します。</p>
+            <input type="text" id="input-room-id" placeholder="相手の部屋IDを入力">
+            <button id="btn-join-room" class="action-btn">接続して参加</button>
         </div>
     </div>
+    <div id="lobby-status" class="lobby-status-msg"></div>
+    <button id="btn-lobby-back" class="text-link-btn">◀ タイトルへ戻る</button>
+</div>
 
-    <!-- 右パネル：NEXT & 重量・応力ガイド -->
-    <div class="side-panel">
-        <div class="ui-card">
-            <h3>NEXT</h3>
-            <canvas id="next-canvas" width="100" height="100"></canvas>
+<!-- 遊び方モーダル -->
+<div id="how-modal" class="modal-overlay">
+    <div class="modal-card">
+        <h2>🏗️ けんちくタワービルドの遊び方</h2>
+        <div class="rule-content">
+            <h4>【基本操作】</h4>
+            <ul>
+                <li><b>マウス移動:</b> 落下位置を水平に移動</li>
+                <li><b>ホイール回転:</b> オブジェクトを30度刻みで回転</li>
+                <li><b>左クリック:</b> 資材を落下</li>
+                <li><b>[R] キー:</b> いつでもリセット / <b>[A]+[C] 3秒長押し:</b> ランキング初期化</li>
+            </ul>
+
+            <h4>【土木・応力システム】</h4>
+            <p>資材の重量としなりに応じて土台（橋脚）が <b>青(安全) ➔ 緑 ➔ 黄 ➔ 赤(限界)</b> と変色します。偏った荷重をかけると一気に崩落します！</p>
+
+            <h4>【対戦ルール (マルチ)】</h4>
+            <ul>
+                <li>1つの盤面に交互に資材を落とすターン制サドンデス。</li>
+                <li><b>1ターン制限時間: 15秒</b>（時間切れ時は強制投下）。</li>
+                <li>自分の手番でタワーを崩壊させたら敗北！</li>
+                <li><b>自滅ペナルティ:</b> 触れずに画面外へ落とした場合は即時失格。</li>
+            </ul>
+        </div>
+        <button id="btn-close-how" class="action-btn">閉じる</button>
+    </div>
+</div>
+
+<!-- ゲームプレイ画面 -->
+<div id="game-view" style="display:none;">
+    <div id="info">
+        <span id="turn-banner" style="display:none;" class="turn-banner">準備中...</span>
+        🏗️ <b>けんちくタワービルド</b> | <button id="btn-back-to-title" class="sub-btn">タイトルへ戻る</button>
+    </div>
+
+    <div id="game-layout">
+        <!-- 左パネル -->
+        <div class="side-panel">
+            <div class="ui-card">
+                <h3>SCORE</h3>
+                <div id="score" class="score-num">0</div>
+                <div class="stat-detail">
+                    高さ: <span id="stat-height" style="color:#fff;">0</span>px<br>
+                    総重量: <span id="stat-weight" style="color:#fff;">0</span>kg
+                </div>
+            </div>
+
+            <div class="ui-card">
+                <h3>BEST RANKING</h3>
+                <ol id="ranking-list" class="ranking-list"></ol>
+            </div>
         </div>
 
-        <div class="ui-card">
-            <h3>重量目安 (軽 ➔ 重)</h3>
-            <div class="weight-item">
-                <span class="weight-badge" style="background:#c49a6c;"></span>
-                <span>ダンボール</span>
-                <span style="color:#aaa;">軽量</span>
-            </div>
-            <div class="weight-item">
-                <span class="weight-badge" style="background:#8b5a2b;"></span>
-                <span>木材資材</span>
-                <span style="color:#aaa;">軽量</span>
-            </div>
-            <div class="weight-item">
-                <span class="weight-badge" style="background:#95a5a6;"></span>
-                <span>テトラ</span>
-                <span style="color:#aaa;">軽量</span>
-            </div>
-            <div class="weight-item">
-                <span class="weight-badge" style="background:#f1c40f;"></span>
-                <span>ロードローラー</span>
-                <span style="color:#e74c3c; font-weight:bold;">重量級</span>
+        <!-- 中央：メイン画面 -->
+        <div id="main-canvas-container">
+            <div id="turn-timer-display" style="display:none;">残り時間: <span id="turn-timer-sec">15</span>s</div>
+
+            <div id="reset-progress-container">
+                <div id="reset-text">スコアリセット中... [A]+[C]長押し (3秒)</div>
+                <div style="background:#333; border-radius:4px; overflow:hidden;">
+                    <div id="reset-progress-bar"></div>
+                </div>
             </div>
 
-            <div class="stress-section">
-                <div class="stress-title">床の応力状態</div>
-                <div class="stress-legend">
-                    <span>安全</span>
-                    <div class="stress-bar-bg"></div>
-                    <span>限界</span>
+            <div id="game-over-screen">
+                <h1 id="game-over-title">GAME OVER</h1>
+                <p id="game-over-msg">崩壊しました！</p>
+                <p>FINAL SCORE: <span id="final-score" style="color: #f39c12; font-weight: bold;">0</span></p>
+                <button id="retry-btn" class="retry-btn">[R] リトライ</button>
+                <button id="game-over-title-btn" class="sub-btn" style="margin-top:10px;">タイトルへ戻る</button>
+            </div>
+        </div>
+
+        <!-- 右パネル -->
+        <div class="side-panel">
+            <div class="ui-card">
+                <h3>NEXT</h3>
+                <canvas id="next-canvas" width="100" height="100"></canvas>
+            </div>
+
+            <div class="ui-card">
+                <h3>重量目安 (軽 ➔ 重)</h3>
+                <div class="weight-item">
+                    <span class="weight-badge" style="background:#c49a6c;"></span>
+                    <span>ダンボール</span>
+                    <span style="color:#aaa;">10kg</span>
+                </div>
+                <div class="weight-item">
+                    <span class="weight-badge" style="background:#8b5a2b;"></span>
+                    <span>木材資材</span>
+                    <span style="color:#aaa;">15kg</span>
+                </div>
+                <div class="weight-item">
+                    <span class="weight-badge" style="background:#95a5a6;"></span>
+                    <span>テトラ</span>
+                    <span style="color:#aaa;">20kg</span>
+                </div>
+                <div class="weight-item">
+                    <span class="weight-badge" style="background:#f1c40f;"></span>
+                    <span>ロードローラー</span>
+                    <span style="color:#e74c3c; font-weight:bold;">35kg</span>
+                </div>
+
+                <div class="stress-section">
+                    <div class="stress-title">床の応力状態</div>
+                    <div class="stress-legend">
+                        <span>安全</span>
+                        <div class="stress-bar-bg"></div>
+                        <span>限界</span>
+                    </div>
                 </div>
             </div>
         </div>
