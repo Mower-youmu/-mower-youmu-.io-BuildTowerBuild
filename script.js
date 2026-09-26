@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.5';
+const JS_VERSION = 'v1.0.6';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -35,10 +35,11 @@ const TURN_TIME_LIMIT = 15;
 // ==========================================
 let gameMode = 'solo';
 let isHost = true;
-let currentTurn = 'host'; // 現在の手番プレイヤー（床接触時にこの手番の人が負け）
+let currentTurn = 'host';
 let isGameOver = false;
 let canDrop = true;
 let currentActiveBody = null;
+let turnSwitchTimeout = null;
 
 let mouseX = width / 2;
 let currentAngle = 0;
@@ -329,6 +330,7 @@ function cleanupP2P() {
     if (p2pConn) { p2pConn.close(); p2pConn = null; }
     if (peer) { peer.destroy(); peer = null; }
     clearInterval(turnTimer);
+    clearTimeout(turnSwitchTimeout);
 }
 
 // ==========================================
@@ -553,6 +555,7 @@ function cleanupPhysics() {
         guestCanvas = null;
         guestCtx = null;
     }
+    clearTimeout(turnSwitchTimeout);
 }
 
 // ==========================================
@@ -611,6 +614,8 @@ function setupCanvasInput() {
 
 function executeDrop(x, angle) {
     canDrop = false;
+    clearTimeout(turnSwitchTimeout);
+
     const def = shapeDefs[nextType] || shapeDefs.box;
     const newBody = def.create(x, dropSpawnY);
 
@@ -767,22 +772,31 @@ function setupPhysicsEvents() {
                             landedBlocks.push(currentActiveBody);
                         }
 
+                        // ★ 接触即交代ではなく、静止・安定するまでのディレイを挟む（床落下判定を優先させる）
+                        const bodyToSettle = currentActiveBody;
                         currentActiveBody = null;
 
-                        if (gameMode === 'multi') {
-                            switchTurn();
-                        } else {
-                            canDrop = true;
-                            nextType = getRandomType();
-                            drawNextPreview();
-                        }
+                        clearTimeout(turnSwitchTimeout);
+                        turnSwitchTimeout = setTimeout(() => {
+                            if (isGameOver) return;
+                            // まだ盤上に残っている場合のみ安全にターン交代
+                            if (bodyToSettle.position.y < 570) {
+                                if (gameMode === 'multi') {
+                                    switchTurn();
+                                } else {
+                                    canDrop = true;
+                                    nextType = getRandomType();
+                                    drawNextPreview();
+                                }
+                            }
+                        }, 500); // 0.5秒の猶予を持たせる
                     }
                 }
             }
 
             // 地面落下（ゲームオーバー）判定
-            // ★ 床に触れたその瞬間に手番（currentTurn）を持っているプレイヤーが敗者
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
+                clearTimeout(turnSwitchTimeout);
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
                     triggerSelfDestructGameOver();
@@ -801,13 +815,13 @@ function triggerSelfDestructGameOver() {
     isGameOver = true;
     canDrop = false;
     clearInterval(turnTimer);
+    clearTimeout(turnSwitchTimeout);
 
     currentScore = 0;
     document.getElementById('score').textContent = '0';
     document.getElementById('final-score').textContent = '0';
 
     if (gameMode === 'multi') {
-        // 現在の手番プレイヤーが自滅敗者
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
         
@@ -829,9 +843,10 @@ function triggerGameOver() {
     isGameOver = true;
     canDrop = false;
     clearInterval(turnTimer);
+    clearTimeout(turnSwitchTimeout);
 
     if (gameMode === 'multi') {
-        // 現在の手番プレイヤー（床に崩落させた瞬間のターン保持者）が敗者
+        // 床に触れたその瞬間の手番プレイヤーが敗者
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
 
@@ -855,6 +870,7 @@ function handleRemoteGameOver(data) {
     isGameOver = true;
     canDrop = false;
     clearInterval(turnTimer);
+    clearTimeout(turnSwitchTimeout);
 
     const amILoser = (data.loser === 'host' && isHost) || (data.loser === 'guest' && !isHost);
     
