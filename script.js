@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.3';
+const JS_VERSION = 'v1.0.4';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -36,6 +36,7 @@ const TURN_TIME_LIMIT = 15;
 let gameMode = 'solo';
 let isHost = true;
 let currentTurn = 'host';
+let lastDropPlayer = 'host'; // 直前にブロックを落としたプレイヤー
 let isGameOver = false;
 let canDrop = true;
 let currentActiveBody = null;
@@ -214,6 +215,7 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
         setTimeout(() => {
             gameMode = 'multi';
             currentTurn = 'host';
+            lastDropPlayer = 'host';
             canDrop = true;
             nextType = getRandomType();
             showGameView();
@@ -293,6 +295,7 @@ function handleP2PMessage(data) {
         gameMode = 'multi';
         nextType = data.nextType || getRandomType();
         currentTurn = data.turn;
+        lastDropPlayer = data.turn;
         canDrop = isMyTurn();
         drawNextPreview();
         showGameView();
@@ -307,6 +310,7 @@ function handleP2PMessage(data) {
     } else if (data.type === 'request_drop') {
         if (isHost && currentTurn === 'guest' && !currentActiveBody && !isGameOver) {
             if (data.shapeType) nextType = data.shapeType;
+            lastDropPlayer = 'guest'; // ゲストが落としたことを記録
             executeDrop(data.x, data.angle);
         }
     } else if (data.type === 'turn_change') {
@@ -369,6 +373,7 @@ function startTurnTimer() {
         if (remainingSec <= 0) {
             clearInterval(turnTimer);
             if (!currentActiveBody && !isGameOver) {
+                lastDropPlayer = currentTurn;
                 const targetX = (currentTurn === 'host') ? mouseX : remoteMouseX;
                 const targetAngle = (currentTurn === 'host') ? currentAngle : remoteAngle;
                 executeDrop(targetX, targetAngle);
@@ -601,9 +606,11 @@ function setupCanvasInput() {
         const dropX = e.clientX - rect.left;
 
         if (gameMode === 'solo' || isHost) {
+            lastDropPlayer = 'host';
             executeDrop(dropX, currentAngle);
         } else {
             canDrop = false;
+            lastDropPlayer = 'guest';
             p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle, shapeType: nextType });
         }
     });
@@ -755,6 +762,7 @@ function setupPhysicsEvents() {
                 blockObj.hasTouched = true;
             }
 
+            // 着地判定
             if (currentActiveBody) {
                 const isCurrent = (bodyA === currentActiveBody || bodyB === currentActiveBody);
                 if (isCurrent) {
@@ -779,6 +787,7 @@ function setupPhysicsEvents() {
                 }
             }
 
+            // 地面落下（ゲームオーバー）判定
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
@@ -837,10 +846,10 @@ function triggerSelfDestructGameOver() {
     document.getElementById('final-score').textContent = '0';
 
     if (gameMode === 'multi') {
-        const loser = currentTurn;
+        // 自滅させたプレイヤー（直前に落とした者）を敗者とする
+        const loser = lastDropPlayer;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
         
-        // 自滅時：負けた側は負け犬、勝った側は人生の勝利者
         document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
         document.getElementById('game-over-msg').textContent = amILoser ? 'スコア確定させる為に自滅する。これ、恥ずかしいですからね' : '隣が自滅したのでね、やらないようにしましょう';
 
@@ -861,10 +870,10 @@ function triggerGameOver() {
     clearInterval(turnTimer);
 
     if (gameMode === 'multi') {
-        const loser = currentTurn;
+        // 崩壊させたプレイヤー（直前に落とした者）を敗者とする
+        const loser = lastDropPlayer;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
 
-        // 崩壊時：崩壊させた側（amILoser = true）が「Dead Parrot（負け犬）」、耐えきった側（amILoser = false）が「Winner!（人生の勝利者）」
         document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
         document.getElementById('game-over-msg').textContent = amILoser ? '負け犬' : '人生の勝利者';
 
@@ -888,7 +897,6 @@ function handleRemoteGameOver(data) {
 
     const amILoser = (data.loser === 'host' && isHost) || (data.loser === 'guest' && !isHost);
     
-    // 受信側（ゲスト）：敗者判定に応じて正しく出し分け
     document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
     
     if (data.selfDestruct) {
@@ -913,6 +921,7 @@ function restartMatch(sendSignal = true) {
         }
 
         currentTurn = 'host';
+        lastDropPlayer = 'host';
         canDrop = isHost;
         nextType = getRandomType();
         drawNextPreview();
