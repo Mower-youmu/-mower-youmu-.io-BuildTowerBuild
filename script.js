@@ -21,14 +21,14 @@ const startY = 460;
 const wireLength = 1;
 const wireAngle = 45;
 const dropSpawnY = 50; 
-const TURN_TIME_LIMIT = 15; // ターン制限時間(秒)
+const TURN_TIME_LIMIT = 15;
 
 // ==========================================
 // ゲーム状態管理
 // ==========================================
-let gameMode = 'solo'; // 'solo' | 'multi'
+let gameMode = 'solo';
 let isHost = true;
-let currentTurn = 'host'; // 'host' | 'guest'
+let currentTurn = 'host';
 let isGameOver = false;
 let canDrop = true;
 let currentActiveBody = null;
@@ -42,16 +42,13 @@ let landedBlocks = [];
 let bridgeBodies = [];
 let bridgeConstraints = [];
 
-// 対戦相手のマウス同期用
 let remoteMouseX = width / 2;
 let remoteAngle = 0;
 let isRemoteInCanvas = false;
 
-// ターンタイマー
 let turnTimer = null;
 let remainingSec = TURN_TIME_LIMIT;
 
-// PeerJS関連
 let peer = null;
 let p2pConn = null;
 let currentRoomNumber = '';
@@ -171,7 +168,7 @@ function showGameView() {
 }
 
 // ==========================================
-// PeerJS P2P 通信処理（4桁ID & コピー対応）
+// PeerJS P2P 通信処理
 // ==========================================
 const lobbyStatus = document.getElementById('lobby-status');
 
@@ -180,13 +177,12 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
     lobbyStatus.textContent = '4桁の部屋IDを発行中...';
     cleanupP2P();
 
-    // 4桁のランダムな数字
     currentRoomNumber = Math.floor(1000 + Math.random() * 9000).toString();
     const fullPeerId = 'ktb-' + currentRoomNumber;
 
     peer = new Peer(fullPeerId);
 
-    peer.on('open', (id) => {
+    peer.on('open', () => {
         document.getElementById('host-id-display').style.display = 'block';
         document.getElementById('my-peer-id').textContent = currentRoomNumber;
         lobbyStatus.textContent = '部屋を作成しました。相手の接続を待機しています...';
@@ -215,7 +211,6 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
     });
 });
 
-// コピーボタン処理
 document.getElementById('btn-copy-id').addEventListener('click', () => {
     if (!currentRoomNumber) return;
     navigator.clipboard.writeText(currentRoomNumber).then(() => {
@@ -404,7 +399,9 @@ function initPhysics() {
     bridgeBodies = [];
     bridgeConstraints = [];
 
-    const group = Body.nextGroup ? Body.nextGroup(true) : -1;
+    // ★ 衝突防止グループ設定（確実に板同士の反発を無効化）
+    const bridgeGroup = Body.nextGroup ? Body.nextGroup(true) : -1;
+
     for (let i = 0; i < segments; i++) {
         const x = startX + (i * segWidth) + (segWidth / 2);
         const segment = Bodies.rectangle(x, startY, segWidth + 2, segHeight, {
@@ -414,7 +411,11 @@ function initPhysics() {
             restitution: 0.0,
             density: 0.0009,
             label: 'bridge',
-            collisionFilter: { group: group },
+            collisionFilter: { 
+                group: bridgeGroup,
+                category: 0x0002,
+                mask: 0xFFFFFFFF ^ 0x0002 // 板同士の当たり判定を完全除外
+            },
             render: { fillStyle: '#2980b9' }
         });
         bridgeBodies.push(segment);
@@ -433,7 +434,7 @@ function initPhysics() {
             bodyA: bridgeBodies[i],
             bodyB: bridgeBodies[i + 1],
             pointA: { x: segWidth / 2, y: segHeight / 3 },
-            pointB: { x: -segWidth / 2, y: -segHeight / 3 },
+            pointB: { x: -segWidth / 2, y: segHeight / 3 },
             stiffness: 0.99, damping: 0.5, length: 0,
             render: { visible: false }
         });
@@ -560,7 +561,6 @@ function getStressColor(stressRatio) {
 function renderGuides(mainCtx) {
     const def = shapeDefs[nextType];
 
-    // 自プレイヤー
     if (canDrop && !isGameOver && isMouseInCanvas && isMyTurn()) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -579,7 +579,6 @@ function renderGuides(mainCtx) {
         mainCtx.restore();
     }
 
-    // 相手プレイヤー
     if (gameMode === 'multi' && canDrop && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -651,13 +650,9 @@ function setupPhysicsEvents() {
             currentScore = 0;
         }
 
-        // ゲストへ同期送信
         if (gameMode === 'multi' && p2pConn && p2pConn.open) {
             const bodiesData = Composite.allBodies(world).map(b => ({
                 label: b.label,
-                x: b.position.x,
-                y: b.position.y,
-                angle: b.angle,
                 color: b.render.fillStyle,
                 vertices: b.vertices.map(v => ({ x: v.x, y: v.y }))
             }));
@@ -723,9 +718,10 @@ function setupPhysicsEvents() {
 }
 
 function applyRemoteState(data) {
-    document.getElementById('score').textContent = data.score;
-    document.getElementById('stat-height').textContent = data.height;
-    document.getElementById('stat-weight').textContent = data.weight;
+    if (!data || !data.bodies) return;
+    document.getElementById('score').textContent = data.score || 0;
+    document.getElementById('stat-height').textContent = data.height || 0;
+    document.getElementById('stat-weight').textContent = data.weight || 0;
 
     const ctx = render.context;
     ctx.clearRect(0, 0, width, height);
@@ -738,7 +734,7 @@ function applyRemoteState(data) {
             ctx.lineTo(b.vertices[j].x, b.vertices[j].y);
         }
         ctx.closePath();
-        ctx.fillStyle = b.color || '#999';
+        ctx.fillStyle = b.color || '#2980b9';
         ctx.fill();
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 1;
