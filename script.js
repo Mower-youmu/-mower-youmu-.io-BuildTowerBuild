@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.4';
+const JS_VERSION = 'v1.0.5';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -35,8 +35,7 @@ const TURN_TIME_LIMIT = 15;
 // ==========================================
 let gameMode = 'solo';
 let isHost = true;
-let currentTurn = 'host';
-let lastDropPlayer = 'host'; // 直前にブロックを落としたプレイヤー
+let currentTurn = 'host'; // 現在の手番プレイヤー（床接触時にこの手番の人が負け）
 let isGameOver = false;
 let canDrop = true;
 let currentActiveBody = null;
@@ -215,7 +214,6 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
         setTimeout(() => {
             gameMode = 'multi';
             currentTurn = 'host';
-            lastDropPlayer = 'host';
             canDrop = true;
             nextType = getRandomType();
             showGameView();
@@ -295,7 +293,6 @@ function handleP2PMessage(data) {
         gameMode = 'multi';
         nextType = data.nextType || getRandomType();
         currentTurn = data.turn;
-        lastDropPlayer = data.turn;
         canDrop = isMyTurn();
         drawNextPreview();
         showGameView();
@@ -310,7 +307,6 @@ function handleP2PMessage(data) {
     } else if (data.type === 'request_drop') {
         if (isHost && currentTurn === 'guest' && !currentActiveBody && !isGameOver) {
             if (data.shapeType) nextType = data.shapeType;
-            lastDropPlayer = 'guest'; // ゲストが落としたことを記録
             executeDrop(data.x, data.angle);
         }
     } else if (data.type === 'turn_change') {
@@ -373,7 +369,6 @@ function startTurnTimer() {
         if (remainingSec <= 0) {
             clearInterval(turnTimer);
             if (!currentActiveBody && !isGameOver) {
-                lastDropPlayer = currentTurn;
                 const targetX = (currentTurn === 'host') ? mouseX : remoteMouseX;
                 const targetAngle = (currentTurn === 'host') ? currentAngle : remoteAngle;
                 executeDrop(targetX, targetAngle);
@@ -606,11 +601,9 @@ function setupCanvasInput() {
         const dropX = e.clientX - rect.left;
 
         if (gameMode === 'solo' || isHost) {
-            lastDropPlayer = 'host';
             executeDrop(dropX, currentAngle);
         } else {
             canDrop = false;
-            lastDropPlayer = 'guest';
             p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle, shapeType: nextType });
         }
     });
@@ -788,6 +781,7 @@ function setupPhysicsEvents() {
             }
 
             // 地面落下（ゲームオーバー）判定
+            // ★ 床に触れたその瞬間に手番（currentTurn）を持っているプレイヤーが敗者
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
@@ -798,39 +792,6 @@ function setupPhysicsEvents() {
             }
         });
     });
-}
-
-function applyRemoteState(data) {
-    if (!guestCtx || !data || !data.bodies) return;
-
-    if (data.nextType && nextType !== data.nextType) {
-        nextType = data.nextType;
-        drawNextPreview();
-    }
-
-    document.getElementById('score').textContent = data.score || 0;
-    document.getElementById('stat-height').textContent = data.height || 0;
-    document.getElementById('stat-weight').textContent = data.weight || 0;
-
-    guestCtx.fillStyle = '#87CEEB';
-    guestCtx.fillRect(0, 0, width, height);
-
-    data.bodies.forEach(b => {
-        if (!b.vertices || b.vertices.length === 0) return;
-        guestCtx.beginPath();
-        guestCtx.moveTo(b.vertices[0].x, b.vertices[0].y);
-        for (let j = 1; j < b.vertices.length; j++) {
-            guestCtx.lineTo(b.vertices[j].x, b.vertices[j].y);
-        }
-        guestCtx.closePath();
-        guestCtx.fillStyle = b.color || '#2980b9';
-        guestCtx.fill();
-        guestCtx.strokeStyle = '#333';
-        guestCtx.lineWidth = 1;
-        guestCtx.stroke();
-    });
-
-    renderGuides(guestCtx);
 }
 
 // ==========================================
@@ -846,8 +807,8 @@ function triggerSelfDestructGameOver() {
     document.getElementById('final-score').textContent = '0';
 
     if (gameMode === 'multi') {
-        // 自滅させたプレイヤー（直前に落とした者）を敗者とする
-        const loser = lastDropPlayer;
+        // 現在の手番プレイヤーが自滅敗者
+        const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
         
         document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
@@ -870,8 +831,8 @@ function triggerGameOver() {
     clearInterval(turnTimer);
 
     if (gameMode === 'multi') {
-        // 崩壊させたプレイヤー（直前に落とした者）を敗者とする
-        const loser = lastDropPlayer;
+        // 現在の手番プレイヤー（床に崩落させた瞬間のターン保持者）が敗者
+        const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
 
         document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
@@ -910,6 +871,39 @@ function handleRemoteGameOver(data) {
     document.getElementById('game-over-screen').style.display = 'flex';
 }
 
+function applyRemoteState(data) {
+    if (!guestCtx || !data || !data.bodies) return;
+
+    if (data.nextType && nextType !== data.nextType) {
+        nextType = data.nextType;
+        drawNextPreview();
+    }
+
+    document.getElementById('score').textContent = data.score || 0;
+    document.getElementById('stat-height').textContent = data.height || 0;
+    document.getElementById('stat-weight').textContent = data.weight || 0;
+
+    guestCtx.fillStyle = '#87CEEB';
+    guestCtx.fillRect(0, 0, width, height);
+
+    data.bodies.forEach(b => {
+        if (!b.vertices || b.vertices.length === 0) return;
+        guestCtx.beginPath();
+        guestCtx.moveTo(b.vertices[0].x, b.vertices[0].y);
+        for (let j = 1; j < b.vertices.length; j++) {
+            guestCtx.lineTo(b.vertices[j].x, b.vertices[j].y);
+        }
+        guestCtx.closePath();
+        guestCtx.fillStyle = b.color || '#2980b9';
+        guestCtx.fill();
+        guestCtx.strokeStyle = '#333';
+        guestCtx.lineWidth = 1;
+        guestCtx.stroke();
+    });
+
+    renderGuides(guestCtx);
+}
+
 function restartMatch(sendSignal = true) {
     document.getElementById('game-over-screen').style.display = 'none';
 
@@ -921,7 +915,6 @@ function restartMatch(sendSignal = true) {
         }
 
         currentTurn = 'host';
-        lastDropPlayer = 'host';
         canDrop = isHost;
         nextType = getRandomType();
         drawNextPreview();
