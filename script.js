@@ -62,21 +62,30 @@ const shapeDefs = {
         density: 0.0005, friction: 1.0, frictionStatic: 5.0, frictionAir: 0.03, restitution: 0.0,
         label: 'block', color: '#c49a6c',
         draw: (ctx) => ctx.fillRect(-20, -20, 40, 40),
-        create: (x, y) => Bodies.rectangle(x, y, 40, 40, shapeDefs.box)
+        create: (x, y) => Bodies.rectangle(x, y, 40, 40, {
+            ...shapeDefs.box,
+            collisionFilter: { category: 0x0001, mask: 0xFFFF }
+        })
     },
     heavy: {
         weightVal: 35,
         density: 0.001, friction: 1.0, frictionStatic: 5.0, frictionAir: 0.01, restitution: 0.0,
         label: 'block', color: '#f1c40f',
         draw: (ctx) => ctx.fillRect(-15, -25, 30, 50),
-        create: (x, y) => Bodies.rectangle(x, y, 30, 50, shapeDefs.heavy)
+        create: (x, y) => Bodies.rectangle(x, y, 30, 50, {
+            ...shapeDefs.heavy,
+            collisionFilter: { category: 0x0001, mask: 0xFFFF }
+        })
     },
     wide: {
         weightVal: 15,
         density: 0.0005, friction: 1.0, frictionStatic: 5.0, frictionAir: 0.06, restitution: 0.0,
         label: 'block', color: '#8b5a2b',
         draw: (ctx) => ctx.fillRect(-35, -12, 70, 24),
-        create: (x, y) => Bodies.rectangle(x, y, 70, 24, shapeDefs.wide)
+        create: (x, y) => Bodies.rectangle(x, y, 70, 24, {
+            ...shapeDefs.wide,
+            collisionFilter: { category: 0x0001, mask: 0xFFFF }
+        })
     },
     tetra: {
         weightVal: 20,
@@ -94,7 +103,10 @@ const shapeDefs = {
             ctx.closePath();
             ctx.fill();
         },
-        create: (x, y) => Bodies.polygon(x, y, 5, 24, shapeDefs.tetra)
+        create: (x, y) => Bodies.polygon(x, y, 5, 24, {
+            ...shapeDefs.tetra,
+            collisionFilter: { category: 0x0001, mask: 0xFFFF }
+        })
     }
 };
 const shapeKeys = ['box', 'heavy', 'tetra', 'wide'];
@@ -278,9 +290,7 @@ function handleP2PMessage(data) {
         initPhysics();
         updateTurnUI();
     } else if (data.type === 'sync_state') {
-        if (!isHost) {
-            applyRemoteState(data);
-        }
+        if (!isHost) applyRemoteState(data);
     } else if (data.type === 'cursor') {
         remoteMouseX = data.x;
         remoteAngle = data.angle;
@@ -292,7 +302,7 @@ function handleP2PMessage(data) {
     } else if (data.type === 'turn_change') {
         currentTurn = data.turn;
         nextType = data.nextType;
-        canDrop = isMyTurn(); // ★手番が回ってきたら確実に投下可能に復帰
+        canDrop = isMyTurn();
         drawNextPreview();
         updateTurnUI();
         startTurnTimer();
@@ -300,6 +310,9 @@ function handleP2PMessage(data) {
         document.getElementById('turn-timer-sec').textContent = data.sec;
     } else if (data.type === 'game_over') {
         handleRemoteGameOver(data);
+    } else if (data.type === 'restart_game') {
+        // 再戦シグナルを受信
+        restartMatch(false);
     }
 }
 
@@ -358,7 +371,7 @@ function startTurnTimer() {
 function switchTurn() {
     currentTurn = (currentTurn === 'host') ? 'guest' : 'host';
     nextType = getRandomType();
-    canDrop = isMyTurn(); // ホスト側も投下可能状態を更新
+    canDrop = isMyTurn();
     drawNextPreview();
     updateTurnUI();
     startTurnTimer();
@@ -384,11 +397,12 @@ function initPhysics() {
     const mainContainer = document.getElementById('main-canvas-container');
 
     if (isHost) {
-        // ホスト/ソロ：物理エンジン & レンダラーを稼働
-        engine = Engine.create();
+        engine = Engine.create({
+            enableSleeping: false
+        });
         world = engine.world;
-        engine.positionIterations = 15;
-        engine.velocityIterations = 15;
+        engine.positionIterations = 20;
+        engine.velocityIterations = 20;
 
         render = Render.create({
             element: mainContainer,
@@ -409,7 +423,6 @@ function initPhysics() {
         createBridge();
         setupPhysicsEvents();
     } else {
-        // ゲスト：Matter.js は動かさず、軽量な純粋Canvasとして作成
         guestCanvas = document.createElement('canvas');
         guestCanvas.width = width;
         guestCanvas.height = height;
@@ -424,6 +437,10 @@ function initPhysics() {
     currentScore = 0;
     landedBlocks = [];
 
+    document.getElementById('score').textContent = '0';
+    document.getElementById('stat-height').textContent = '0';
+    document.getElementById('stat-weight').textContent = '0';
+
     drawNextPreview();
     setupCanvasInput();
 }
@@ -432,21 +449,19 @@ function createBridge() {
     bridgeBodies = [];
     bridgeConstraints = [];
 
-    const bridgeGroup = Body.nextGroup ? Body.nextGroup(true) : -1;
-
+    // 板同士は互いに一切接触（反発）しないよう category 0x0002 / mask 0x0001 (資材のみと衝突) に設定
     for (let i = 0; i < segments; i++) {
         const x = startX + (i * segWidth) + (segWidth / 2);
-        const segment = Bodies.rectangle(x, startY, segWidth + 2, segHeight, {
+        const segment = Bodies.rectangle(x, startY, segWidth, segHeight, {
             friction: 1.0,
             frictionStatic: 5.0,
-            frictionAir: 0.05,
+            frictionAir: 0.08,
             restitution: 0.0,
-            density: 0.0009,
+            density: 0.001,
             label: 'bridge',
-            collisionFilter: { 
-                group: bridgeGroup,
+            collisionFilter: {
                 category: 0x0002,
-                mask: 0xFFFFFFFF ^ 0x0002
+                mask: 0x0001 // ブロック(0x0001)とのみ衝突し、板同士(0x0002)は完全にすり抜ける
             },
             render: { fillStyle: '#2980b9' }
         });
@@ -459,15 +474,19 @@ function createBridge() {
             bodyB: bridgeBodies[i + 1],
             pointA: { x: segWidth / 2, y: -segHeight / 3 },
             pointB: { x: -segWidth / 2, y: -segHeight / 3 },
-            stiffness: 0.99, damping: 0.5, length: 0,
+            stiffness: 0.99,
+            damping: 0.6,
+            length: 0,
             render: { visible: false }
         });
         const cBottom = Constraint.create({
             bodyA: bridgeBodies[i],
             bodyB: bridgeBodies[i + 1],
             pointA: { x: segWidth / 2, y: segHeight / 3 },
-            pointB: { x: -segWidth / 2, y: -segHeight / 3 },
-            stiffness: 0.99, damping: 0.5, length: 0,
+            pointB: { x: -segWidth / 2, y: segHeight / 3 },
+            stiffness: 0.99,
+            damping: 0.6,
+            length: 0,
             render: { visible: false }
         });
         bridgeConstraints.push(cTop, cBottom);
@@ -481,7 +500,9 @@ function createBridge() {
         pointA: { x: startX - offsetX, y: startY - offsetY },
         bodyB: bridgeBodies[0],
         pointB: { x: -segWidth / 2, y: 0 },
-        length: wireLength, stiffness: 0.9, damping: 0.3,
+        length: wireLength,
+        stiffness: 0.95,
+        damping: 0.4,
         render: { strokeStyle: '#ffffff', lineWidth: 4 }
     });
 
@@ -489,12 +510,16 @@ function createBridge() {
         pointA: { x: startX + totalWidth + offsetX, y: startY - offsetY },
         bodyB: bridgeBodies[segments - 1],
         pointB: { x: segWidth / 2, y: 0 },
-        length: wireLength, stiffness: 0.9, damping: 0.3,
+        length: wireLength,
+        stiffness: 0.95,
+        damping: 0.4,
         render: { strokeStyle: '#ffffff', lineWidth: 4 }
     });
 
     const ground = Bodies.rectangle(width / 2, 590, width, 20, { 
-        isStatic: true, label: 'ground',
+        isStatic: true,
+        label: 'ground',
+        collisionFilter: { category: 0x0004, mask: 0xFFFF },
         render: { fillStyle: '#333' } 
     });
 
@@ -596,7 +621,6 @@ function getStressColor(stressRatio) {
 function renderGuides(mainCtx) {
     const def = shapeDefs[nextType];
 
-    // 自分のプレビュー（自分の手番の時）
     if (canDrop && !isGameOver && isMouseInCanvas && isMyTurn()) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -615,7 +639,6 @@ function renderGuides(mainCtx) {
         mainCtx.restore();
     }
 
-    // 相手のプレビュー（相手の手番の時）
     if (gameMode === 'multi' && canDrop && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -685,7 +708,6 @@ function setupPhysicsEvents() {
             currentScore = 0;
         }
 
-        // ゲストへ描画データを毎フレーム同期
         if (gameMode === 'multi' && p2pConn && p2pConn.open) {
             const bodiesData = Composite.allBodies(world).map(b => ({
                 label: b.label,
@@ -733,7 +755,6 @@ function setupPhysicsEvents() {
 
                         currentActiveBody = null;
 
-                        // 着地成功でターン交代
                         if (gameMode === 'multi') {
                             switchTurn();
                         } else {
@@ -755,7 +776,6 @@ function setupPhysicsEvents() {
     });
 }
 
-// ゲスト側の画面描画同期
 function applyRemoteState(data) {
     if (!guestCtx || !data || !data.bodies) return;
 
@@ -763,11 +783,9 @@ function applyRemoteState(data) {
     document.getElementById('stat-height').textContent = data.height || 0;
     document.getElementById('stat-weight').textContent = data.weight || 0;
 
-    // 背景描画
     guestCtx.fillStyle = '#87CEEB';
     guestCtx.fillRect(0, 0, width, height);
 
-    // ホストから受信した剛体を描画
     data.bodies.forEach(b => {
         if (!b.vertices || b.vertices.length === 0) return;
         guestCtx.beginPath();
@@ -787,7 +805,7 @@ function applyRemoteState(data) {
 }
 
 // ==========================================
-// ゲームオーバー処理
+// ゲームオーバー ＆ 再戦処理
 // ==========================================
 function triggerSelfDestructGameOver() {
     isGameOver = true;
@@ -858,13 +876,32 @@ function handleRemoteGameOver(data) {
     document.getElementById('game-over-screen').style.display = 'flex';
 }
 
-document.getElementById('retry-btn').addEventListener('click', () => {
+// ★ マルチ対戦でも切断せずにその場で再戦するロジック
+function restartMatch(sendSignal = true) {
+    document.getElementById('game-over-screen').style.display = 'none';
+
     if (gameMode === 'solo') {
         initPhysics();
-        document.getElementById('game-over-screen').style.display = 'none';
     } else {
-        location.reload();
+        if (sendSignal && p2pConn && p2pConn.open) {
+            p2pConn.send({ type: 'restart_game' });
+        }
+
+        currentTurn = 'host';
+        nextType = getRandomType();
+        drawNextPreview();
+        updateTurnUI();
+        initPhysics();
+        startTurnTimer();
+
+        if (isHost && p2pConn && p2pConn.open) {
+            p2pConn.send({ type: 'init', nextType: nextType, turn: currentTurn });
+        }
     }
+}
+
+document.getElementById('retry-btn').addEventListener('click', () => {
+    restartMatch(true);
 });
 
 // ==========================================
@@ -973,9 +1010,8 @@ function cancelResetTrigger() {
 window.addEventListener('keydown', (e) => {
     activeKeys[e.key] = true;
     checkResetTrigger();
-    if ((e.key === 'r' || e.key === 'R') && gameMode === 'solo' && gameView.style.display !== 'none') {
-        initPhysics();
-        document.getElementById('game-over-screen').style.display = 'none';
+    if ((e.key === 'r' || e.key === 'R') && gameView.style.display !== 'none') {
+        restartMatch(true);
     }
 });
 
