@@ -42,7 +42,7 @@ let landedBlocks = [];
 let bridgeBodies = [];
 let bridgeConstraints = [];
 
-// 対戦相手のマウスプレビュー同期用
+// 対戦相手のマウス同期用
 let remoteMouseX = width / 2;
 let remoteAngle = 0;
 let isRemoteInCanvas = false;
@@ -54,6 +54,7 @@ let remainingSec = TURN_TIME_LIMIT;
 // PeerJS関連
 let peer = null;
 let p2pConn = null;
+let currentRoomNumber = '';
 
 // ==========================================
 // 資材定義
@@ -170,18 +171,24 @@ function showGameView() {
 }
 
 // ==========================================
-// PeerJS P2P 通信処理
+// PeerJS P2P 通信処理（4桁ID & コピー対応）
 // ==========================================
 const lobbyStatus = document.getElementById('lobby-status');
 
 document.getElementById('btn-create-room').addEventListener('click', () => {
     isHost = true;
-    lobbyStatus.textContent = 'シグナリングサーバーに接続中...';
-    
-    peer = new Peer();
+    lobbyStatus.textContent = '4桁の部屋IDを発行中...';
+    cleanupP2P();
+
+    // 4桁のランダムな数字
+    currentRoomNumber = Math.floor(1000 + Math.random() * 9000).toString();
+    const fullPeerId = 'ktb-' + currentRoomNumber;
+
+    peer = new Peer(fullPeerId);
+
     peer.on('open', (id) => {
         document.getElementById('host-id-display').style.display = 'block';
-        document.getElementById('my-peer-id').textContent = id;
+        document.getElementById('my-peer-id').textContent = currentRoomNumber;
         lobbyStatus.textContent = '部屋を作成しました。相手の接続を待機しています...';
     });
 
@@ -195,26 +202,46 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
             showGameView();
             initPhysics();
             startTurnTimer();
-            // 初期状態をゲストへ送信
             p2pConn.send({ type: 'init', nextType: nextType, turn: currentTurn });
         }, 1000);
     });
 
     peer.on('error', (err) => {
-        lobbyStatus.textContent = 'エラー: ' + err.type;
+        if (err.type === 'unavailable-id') {
+            lobbyStatus.textContent = 'IDが重複しました。もう一度作成を押してください。';
+        } else {
+            lobbyStatus.textContent = 'エラー: ' + err.type;
+        }
+    });
+});
+
+// コピーボタン処理
+document.getElementById('btn-copy-id').addEventListener('click', () => {
+    if (!currentRoomNumber) return;
+    navigator.clipboard.writeText(currentRoomNumber).then(() => {
+        const copyBtn = document.getElementById('btn-copy-id');
+        copyBtn.textContent = '完了!';
+        setTimeout(() => { copyBtn.textContent = 'コピー'; }, 1500);
+    }).catch(() => {
+        alert('コピーに失敗しました: ' + currentRoomNumber);
     });
 });
 
 document.getElementById('btn-join-room').addEventListener('click', () => {
-    const targetId = document.getElementById('input-room-id').value.trim();
-    if (!targetId) {
-        alert('部屋IDを入力してください');
+    const inputVal = document.getElementById('input-room-id').value.trim();
+    if (!inputVal) {
+        alert('4桁の部屋IDを入力してください');
         return;
     }
-    isHost = false;
-    lobbyStatus.textContent = 'ホストへ接続要求中...';
 
+    const targetId = inputVal.startsWith('ktb-') ? inputVal : 'ktb-' + inputVal;
+
+    isHost = false;
+    lobbyStatus.textContent = '部屋 ' + inputVal + ' に接続要求中...';
+
+    cleanupP2P();
     peer = new Peer();
+
     peer.on('open', () => {
         p2pConn = peer.connect(targetId);
         setupP2PConnection();
@@ -255,17 +282,12 @@ function handleP2PMessage(data) {
         initPhysics();
         updateTurnUI();
     } else if (data.type === 'sync_state') {
-        // ゲスト側の画面描画同期（ホストから受信）
-        if (!isHost) {
-            applyRemoteState(data);
-        }
+        if (!isHost) applyRemoteState(data);
     } else if (data.type === 'cursor') {
-        // 相手のマウス移動同期
         remoteMouseX = data.x;
         remoteAngle = data.angle;
         isRemoteInCanvas = data.inCanvas;
     } else if (data.type === 'request_drop') {
-        // ホスト側：ゲストからの投下リクエストを受理
         if (isHost && currentTurn === 'guest' && canDrop && !isGameOver) {
             executeDrop(data.x, data.angle);
         }
@@ -310,7 +332,7 @@ function startTurnTimer() {
     remainingSec = TURN_TIME_LIMIT;
     document.getElementById('turn-timer-sec').textContent = remainingSec;
 
-    if (!isHost) return; // タイマーのカウントはホストが一括管理
+    if (!isHost) return;
 
     turnTimer = setInterval(() => {
         if (isGameOver) { clearInterval(turnTimer); return; }
@@ -319,7 +341,6 @@ function startTurnTimer() {
 
         if (remainingSec <= 0) {
             clearInterval(turnTimer);
-            // タイムアップ時は強制投下
             if (canDrop) {
                 const targetX = (currentTurn === 'host') ? mouseX : remoteMouseX;
                 const targetAngle = (currentTurn === 'host') ? currentAngle : remoteAngle;
@@ -370,7 +391,6 @@ function initPhysics() {
     render.canvas.classList.add('main-cv');
     Render.run(render);
 
-    // ゲスト側は物理エンジン（Runner）を回さず、ホストからの座標同期で描画
     if (isHost) {
         runner = Runner.create();
         Runner.run(runner, engine);
@@ -384,7 +404,6 @@ function initPhysics() {
     bridgeBodies = [];
     bridgeConstraints = [];
 
-    // --- 1. しなる板 ---
     const group = Body.nextGroup ? Body.nextGroup(true) : -1;
     for (let i = 0; i < segments; i++) {
         const x = startX + (i * segWidth) + (segWidth / 2);
@@ -414,14 +433,13 @@ function initPhysics() {
             bodyA: bridgeBodies[i],
             bodyB: bridgeBodies[i + 1],
             pointA: { x: segWidth / 2, y: segHeight / 3 },
-            pointB: { x: -segWidth / 2, y: segHeight / 3 },
+            pointB: { x: -segWidth / 2, y: -segHeight / 3 },
             stiffness: 0.99, damping: 0.5, length: 0,
             render: { visible: false }
         });
         bridgeConstraints.push(cTop, cBottom);
     }
 
-    // --- 2. ワイヤー固定 ---
     const rad = wireAngle * (Math.PI / 180);
     const offsetX = Math.cos(rad) * wireLength;
     const offsetY = Math.sin(rad) * wireLength;
@@ -510,7 +528,6 @@ function setupCanvasInput() {
         if (gameMode === 'solo' || isHost) {
             executeDrop(dropX, currentAngle);
         } else {
-            // ゲスト時はホストへ投下要求を送信
             canDrop = false;
             p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle });
         }
@@ -540,11 +557,10 @@ function getStressColor(stressRatio) {
     return `hsl(${hue}, 85%, 45%)`;
 }
 
-// 落下ガイド & 相手カーソル描画
 function renderGuides(mainCtx) {
     const def = shapeDefs[nextType];
 
-    // 1. 自プレイヤーのプレビュー
+    // 自プレイヤー
     if (canDrop && !isGameOver && isMouseInCanvas && isMyTurn()) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -563,7 +579,7 @@ function renderGuides(mainCtx) {
         mainCtx.restore();
     }
 
-    // 2. 相手プレイヤーのプレビュー（マルチ対戦中）
+    // 相手プレイヤー
     if (gameMode === 'multi' && canDrop && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -584,24 +600,22 @@ function renderGuides(mainCtx) {
 }
 
 // ==========================================
-// 物理アップデート ＆ 同期送信
+// 物理更新 ＆ 同期送信
 // ==========================================
 function setupPhysicsEvents() {
     Events.on(render, 'afterRender', () => {
         renderGuides(render.context);
     });
 
-    if (!isHost) return; // 計算・判定はホストのみ実行
+    if (!isHost) return;
 
     Events.on(engine, 'afterUpdate', () => {
         if (isGameOver) return;
 
-        // 床下（Y > 570）除外フィルター
         const activeLandedBlocks = landedBlocks.filter(body => {
             return body.position.y < 570 && body.position.x > 0 && body.position.x < width;
         });
 
-        // 応力計算
         bridgeBodies.forEach((segment) => {
             const displacement = Math.max(0, segment.position.y - startY);
             let segmentWeight = 0;
@@ -617,7 +631,6 @@ function setupPhysicsEvents() {
             segment.render.fillStyle = getStressColor(stressRatio);
         });
 
-        // スコア更新
         if (activeLandedBlocks.length > 0) {
             let highestY = startY;
             activeLandedBlocks.forEach(body => {
@@ -638,7 +651,7 @@ function setupPhysicsEvents() {
             currentScore = 0;
         }
 
-        // マルチ対戦：ゲストへ盤面座標を一括同期
+        // ゲストへ同期送信
         if (gameMode === 'multi' && p2pConn && p2pConn.open) {
             const bodiesData = Composite.allBodies(world).map(b => ({
                 label: b.label,
@@ -646,7 +659,6 @@ function setupPhysicsEvents() {
                 y: b.position.y,
                 angle: b.angle,
                 color: b.render.fillStyle,
-                shape: b.shapeType || 'rect',
                 vertices: b.vertices.map(v => ({ x: v.x, y: v.y }))
             }));
 
@@ -691,7 +703,6 @@ function setupPhysicsEvents() {
                         canDrop = true;
                         currentActiveBody = null;
 
-                        // マルチ対戦時は着地成功でターン交代
                         if (gameMode === 'multi') {
                             switchTurn();
                         }
@@ -699,7 +710,6 @@ function setupPhysicsEvents() {
                 }
             }
 
-            // 地面接触
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
@@ -712,7 +722,6 @@ function setupPhysicsEvents() {
     });
 }
 
-// ゲスト側の画面同期描画処理
 function applyRemoteState(data) {
     document.getElementById('score').textContent = data.score;
     document.getElementById('stat-height').textContent = data.height;
@@ -721,7 +730,6 @@ function applyRemoteState(data) {
     const ctx = render.context;
     ctx.clearRect(0, 0, width, height);
 
-    // 受信した頂点データをもとに描画
     data.bodies.forEach(b => {
         if (!b.vertices || b.vertices.length === 0) return;
         ctx.beginPath();
@@ -812,7 +820,6 @@ function handleRemoteGameOver(data) {
     document.getElementById('game-over-screen').style.display = 'flex';
 }
 
-// リトライボタン
 document.getElementById('retry-btn').addEventListener('click', () => {
     if (gameMode === 'solo') {
         initPhysics();
