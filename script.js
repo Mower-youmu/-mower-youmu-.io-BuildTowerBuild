@@ -207,6 +207,8 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
         setTimeout(() => {
             gameMode = 'multi';
             currentTurn = 'host';
+            canDrop = true;
+            nextType = getRandomType();
             showGameView();
             initPhysics();
             startTurnTimer();
@@ -284,7 +286,7 @@ function handleP2PMessage(data) {
         gameMode = 'multi';
         nextType = data.nextType;
         currentTurn = data.turn;
-        canDrop = (currentTurn === 'guest');
+        canDrop = isMyTurn();
         drawNextPreview();
         showGameView();
         initPhysics();
@@ -296,13 +298,14 @@ function handleP2PMessage(data) {
         remoteAngle = data.angle;
         isRemoteInCanvas = data.inCanvas;
     } else if (data.type === 'request_drop') {
+        // ホスト側：ゲストからの投下を実行
         if (isHost && currentTurn === 'guest' && canDrop && !isGameOver) {
             executeDrop(data.x, data.angle);
         }
     } else if (data.type === 'turn_change') {
         currentTurn = data.turn;
         nextType = data.nextType;
-        canDrop = isMyTurn();
+        canDrop = isMyTurn(); // ターン交代でドロップ許可を確実に更新
         drawNextPreview();
         updateTurnUI();
         startTurnTimer();
@@ -311,7 +314,6 @@ function handleP2PMessage(data) {
     } else if (data.type === 'game_over') {
         handleRemoteGameOver(data);
     } else if (data.type === 'restart_game') {
-        // 再戦シグナルを受信
         restartMatch(false);
     }
 }
@@ -357,9 +359,10 @@ function startTurnTimer() {
             p2pConn.send({ type: 'timer_sync', sec: remainingSec });
         }
 
+        // タイムアップ時の強制投下
         if (remainingSec <= 0) {
             clearInterval(turnTimer);
-            if (canDrop) {
+            if (canDrop && !isGameOver) {
                 const targetX = (currentTurn === 'host') ? mouseX : remoteMouseX;
                 const targetAngle = (currentTurn === 'host') ? currentAngle : remoteAngle;
                 executeDrop(targetX, targetAngle);
@@ -398,7 +401,8 @@ function initPhysics() {
 
     if (isHost) {
         engine = Engine.create({
-            enableSleeping: false
+            enableSleeping: false,
+            constraintIterations: 4 // 拘束条件の解法反復数を上げてバネのちぎれを防止
         });
         world = engine.world;
         engine.positionIterations = 20;
@@ -417,7 +421,10 @@ function initPhysics() {
         render.canvas.classList.add('main-cv');
         Render.run(render);
 
-        runner = Runner.create();
+        runner = Runner.create({
+            isFixed: true, // 固定デルタタイムにして画面遷移時のワープを防止
+            delta: 1000 / 60
+        });
         Runner.run(runner, engine);
 
         createBridge();
@@ -449,44 +456,51 @@ function createBridge() {
     bridgeBodies = [];
     bridgeConstraints = [];
 
-    // 板同士は互いに一切接触（反発）しないよう category 0x0002 / mask 0x0001 (資材のみと衝突) に設定
+    // 衝突グループを負の共通値にして剛体同士の反発を無効化
+    const bridgeGroup = Body.nextGroup ? Body.nextGroup(true) : -1;
+
     for (let i = 0; i < segments; i++) {
         const x = startX + (i * segWidth) + (segWidth / 2);
         const segment = Bodies.rectangle(x, startY, segWidth, segHeight, {
             friction: 1.0,
             frictionStatic: 5.0,
-            frictionAir: 0.08,
+            frictionAir: 0.1,
             restitution: 0.0,
             density: 0.001,
             label: 'bridge',
             collisionFilter: {
+                group: bridgeGroup,
                 category: 0x0002,
-                mask: 0x0001 // ブロック(0x0001)とのみ衝突し、板同士(0x0002)は完全にすり抜ける
+                mask: 0x0001
             },
             render: { fillStyle: '#2980b9' }
         });
         bridgeBodies.push(segment);
     }
 
+    // 接続点のオフセットを微小に内側へ寄せ、モーメント暴走を防ぐ
+    const attachX = (segWidth / 2) - 1;
+    const attachY = segHeight / 4;
+
     for (let i = 0; i < segments - 1; i++) {
         const cTop = Constraint.create({
             bodyA: bridgeBodies[i],
             bodyB: bridgeBodies[i + 1],
-            pointA: { x: segWidth / 2, y: -segHeight / 3 },
-            pointB: { x: -segWidth / 2, y: -segHeight / 3 },
-            stiffness: 0.99,
-            damping: 0.6,
-            length: 0,
+            pointA: { x: attachX, y: -attachY },
+            pointB: { x: -attachX, y: -attachY },
+            stiffness: 0.95,
+            damping: 0.7,
+            length: 2,
             render: { visible: false }
         });
         const cBottom = Constraint.create({
             bodyA: bridgeBodies[i],
             bodyB: bridgeBodies[i + 1],
-            pointA: { x: segWidth / 2, y: segHeight / 3 },
-            pointB: { x: -segWidth / 2, y: segHeight / 3 },
-            stiffness: 0.99,
-            damping: 0.6,
-            length: 0,
+            pointA: { x: attachX, y: attachY },
+            pointB: { x: -attachX, y: attachY },
+            stiffness: 0.95,
+            damping: 0.7,
+            length: 2,
             render: { visible: false }
         });
         bridgeConstraints.push(cTop, cBottom);
@@ -502,7 +516,7 @@ function createBridge() {
         pointB: { x: -segWidth / 2, y: 0 },
         length: wireLength,
         stiffness: 0.95,
-        damping: 0.4,
+        damping: 0.5,
         render: { strokeStyle: '#ffffff', lineWidth: 4 }
     });
 
@@ -512,7 +526,7 @@ function createBridge() {
         pointB: { x: segWidth / 2, y: 0 },
         length: wireLength,
         stiffness: 0.95,
-        damping: 0.4,
+        damping: 0.5,
         render: { strokeStyle: '#ffffff', lineWidth: 4 }
     });
 
@@ -556,21 +570,22 @@ function setupCanvasInput() {
         mouseX = e.clientX - rect.left;
         isMouseInCanvas = true;
 
-        if (gameMode === 'multi' && p2pConn && p2pConn.open && isMyTurn()) {
+        // 手番の有無に関わらず、マウス座標は常時相手に送信してカーソルを可視化
+        if (gameMode === 'multi' && p2pConn && p2pConn.open) {
             p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: true });
         }
     });
 
     targetCanvas.addEventListener('mouseleave', () => {
         isMouseInCanvas = false;
-        if (gameMode === 'multi' && p2pConn && p2pConn.open && isMyTurn()) {
+        if (gameMode === 'multi' && p2pConn && p2pConn.open) {
             p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: false });
         }
     });
 
     targetCanvas.addEventListener('wheel', (e) => {
         e.preventDefault();
-        if (!canDrop || isGameOver || !isMyTurn()) return;
+        if (!isMyTurn() || !canDrop || isGameOver) return;
 
         const rotateStep = Math.PI / 6;
         currentAngle += (e.deltaY > 0) ? rotateStep : -rotateStep;
@@ -589,7 +604,7 @@ function setupCanvasInput() {
         if (gameMode === 'solo' || isHost) {
             executeDrop(dropX, currentAngle);
         } else {
-            canDrop = false;
+            canDrop = false; // ゲスト自身は着地待ちに入る
             p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle });
         }
     });
@@ -621,6 +636,7 @@ function getStressColor(stressRatio) {
 function renderGuides(mainCtx) {
     const def = shapeDefs[nextType];
 
+    // 自分のプレビュー（自分の手番の時）
     if (canDrop && !isGameOver && isMouseInCanvas && isMyTurn()) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -639,11 +655,12 @@ function renderGuides(mainCtx) {
         mainCtx.restore();
     }
 
-    if (gameMode === 'multi' && canDrop && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
+    // 相手のプレビュー（相手の手番中、常に表示）
+    if (gameMode === 'multi' && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
         mainCtx.save();
         mainCtx.beginPath();
         mainCtx.setLineDash([4, 4]);
-        mainCtx.strokeStyle = 'rgba(231, 76, 60, 0.6)';
+        mainCtx.strokeStyle = 'rgba(231, 76, 60, 0.7)';
         mainCtx.lineWidth = 2;
         mainCtx.moveTo(remoteMouseX, dropSpawnY);
         mainCtx.lineTo(remoteMouseX, height - 20);
@@ -651,7 +668,7 @@ function renderGuides(mainCtx) {
 
         mainCtx.translate(remoteMouseX, dropSpawnY);
         mainCtx.rotate(remoteAngle);
-        mainCtx.globalAlpha = 0.45;
+        mainCtx.globalAlpha = 0.5;
         mainCtx.fillStyle = def.color;
         def.draw(mainCtx);
         mainCtx.restore();
@@ -740,6 +757,7 @@ function setupPhysicsEvents() {
                 blockObj.hasTouched = true;
             }
 
+            // 投下したブロックが接地した際の判定
             if (currentActiveBody) {
                 const isCurrentA = (bodyA === currentActiveBody);
                 const isCurrentB = (bodyB === currentActiveBody);
@@ -755,6 +773,7 @@ function setupPhysicsEvents() {
 
                         currentActiveBody = null;
 
+                        // ★着地成功で即座にターンを交代し、両者の操作を解放
                         if (gameMode === 'multi') {
                             switchTurn();
                         } else {
@@ -764,6 +783,7 @@ function setupPhysicsEvents() {
                 }
             }
 
+            // 地面への接触によるゲームオーバー判定
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
@@ -876,7 +896,6 @@ function handleRemoteGameOver(data) {
     document.getElementById('game-over-screen').style.display = 'flex';
 }
 
-// ★ マルチ対戦でも切断せずにその場で再戦するロジック
 function restartMatch(sendSignal = true) {
     document.getElementById('game-over-screen').style.display = 'none';
 
@@ -888,6 +907,7 @@ function restartMatch(sendSignal = true) {
         }
 
         currentTurn = 'host';
+        canDrop = isHost;
         nextType = getRandomType();
         drawNextPreview();
         updateTurnUI();
