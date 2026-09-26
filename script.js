@@ -1,3 +1,10 @@
+// ==========================================
+// バージョン管理
+// ==========================================
+const JS_VERSION = 'v1.0.0';
+const jsVerEl = document.getElementById('js-version-display');
+if (jsVerEl) jsVerEl.textContent = JS_VERSION;
+
 const { Engine, Render, Runner, Bodies, Composite, Constraint, Events, Body } = Matter;
 
 const width = 600;
@@ -298,7 +305,6 @@ function handleP2PMessage(data) {
         remoteAngle = data.angle;
         isRemoteInCanvas = data.inCanvas;
     } else if (data.type === 'request_drop') {
-        // ホスト側：ゲストからの投下リクエストを実行（排他制御）
         if (isHost && currentTurn === 'guest' && !currentActiveBody && !isGameOver) {
             if (data.shapeType) nextType = data.shapeType;
             executeDrop(data.x, data.angle);
@@ -448,6 +454,7 @@ function initPhysics() {
     document.getElementById('stat-height').textContent = '0';
     document.getElementById('stat-weight').textContent = '0';
 
+    nextType = getRandomType();
     drawNextPreview();
     setupCanvasInput();
 }
@@ -596,7 +603,7 @@ function setupCanvasInput() {
         if (gameMode === 'solo' || isHost) {
             executeDrop(dropX, currentAngle);
         } else {
-            canDrop = false; // ゲスト自身を即座にロック
+            canDrop = false;
             p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle, shapeType: nextType });
         }
     });
@@ -628,7 +635,6 @@ function getStressColor(stressRatio) {
 function renderGuides(mainCtx) {
     const def = shapeDefs[nextType] || shapeDefs.box;
 
-    // 自分のガイド表示
     if (canDrop && !isGameOver && isMouseInCanvas && isMyTurn()) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -647,7 +653,6 @@ function renderGuides(mainCtx) {
         mainCtx.restore();
     }
 
-    // 相手のガイド表示（相手の手番中）
     if (gameMode === 'multi' && !isGameOver && !isMyTurn() && isRemoteInCanvas) {
         mainCtx.save();
         mainCtx.beginPath();
@@ -750,7 +755,7 @@ function setupPhysicsEvents() {
                 blockObj.hasTouched = true;
             }
 
-            // ★ 着地判定（投下中ブロックの着地を確実に捕捉）
+            // 着地判定
             if (currentActiveBody) {
                 const isCurrent = (bodyA === currentActiveBody || bodyB === currentActiveBody);
                 if (isCurrent) {
@@ -764,11 +769,13 @@ function setupPhysicsEvents() {
 
                         currentActiveBody = null;
 
-                        // ターン交代
                         if (gameMode === 'multi') {
                             switchTurn();
                         } else {
+                            // ★ ソロプレイ時：着地成功で次のブロックを新しく抽選して再描画
                             canDrop = true;
+                            nextType = getRandomType();
+                            drawNextPreview();
                         }
                     }
                 }
