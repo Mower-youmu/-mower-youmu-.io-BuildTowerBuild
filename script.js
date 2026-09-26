@@ -298,15 +298,15 @@ function handleP2PMessage(data) {
         remoteAngle = data.angle;
         isRemoteInCanvas = data.inCanvas;
     } else if (data.type === 'request_drop') {
-        // ホスト側：ゲストのドロップ要求を実行
-        if (isHost && currentTurn === 'guest' && canDrop && !isGameOver) {
+        // ホスト側：ゲストからの投下リクエストを実行（排他制御）
+        if (isHost && currentTurn === 'guest' && !currentActiveBody && !isGameOver) {
             if (data.shapeType) nextType = data.shapeType;
             executeDrop(data.x, data.angle);
         }
     } else if (data.type === 'turn_change') {
         currentTurn = data.turn;
         nextType = data.nextType || getRandomType();
-        canDrop = isMyTurn(); // 確実にターン交代時に操作可能にする
+        canDrop = isMyTurn();
         drawNextPreview();
         updateTurnUI();
         startTurnTimer();
@@ -362,7 +362,7 @@ function startTurnTimer() {
 
         if (remainingSec <= 0) {
             clearInterval(turnTimer);
-            if (canDrop && !isGameOver) {
+            if (!currentActiveBody && !isGameOver) {
                 const targetX = (currentTurn === 'host') ? mouseX : remoteMouseX;
                 const targetAngle = (currentTurn === 'host') ? currentAngle : remoteAngle;
                 executeDrop(targetX, targetAngle);
@@ -562,7 +562,7 @@ function setupCanvasInput() {
         isMouseInCanvas = true;
 
         const now = Date.now();
-        if (gameMode === 'multi' && p2pConn && p2pConn.open && (now - lastCursorSendTime > 40)) {
+        if (gameMode === 'multi' && p2pConn && p2pConn.open && (now - lastCursorSendTime > 35)) {
             lastCursorSendTime = now;
             p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: true });
         }
@@ -596,7 +596,7 @@ function setupCanvasInput() {
         if (gameMode === 'solo' || isHost) {
             executeDrop(dropX, currentAngle);
         } else {
-            canDrop = false; // ゲスト自身をロックしホストへ要請
+            canDrop = false; // ゲスト自身を即座にロック
             p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle, shapeType: nextType });
         }
     });
@@ -730,7 +730,7 @@ function setupPhysicsEvents() {
                 score: currentScore,
                 height: document.getElementById('stat-height').textContent,
                 weight: document.getElementById('stat-weight').textContent,
-                nextType: nextType // 毎フレーム次のブロックを確実に共有
+                nextType: nextType
             });
         }
     });
@@ -750,12 +750,11 @@ function setupPhysicsEvents() {
                 blockObj.hasTouched = true;
             }
 
+            // ★ 着地判定（投下中ブロックの着地を確実に捕捉）
             if (currentActiveBody) {
-                const isCurrentA = (bodyA === currentActiveBody);
-                const isCurrentB = (bodyB === currentActiveBody);
-
-                if (isCurrentA || isCurrentB) {
-                    const otherBody = isCurrentA ? bodyB : bodyA;
+                const isCurrent = (bodyA === currentActiveBody || bodyB === currentActiveBody);
+                if (isCurrent) {
+                    const otherBody = (bodyA === currentActiveBody) ? bodyB : bodyA;
                     if (otherBody.label === 'bridge' || otherBody.label === 'block') {
                         currentActiveBody.hasTouched = true;
                         if (!currentActiveBody.isLanded) {
@@ -765,6 +764,7 @@ function setupPhysicsEvents() {
 
                         currentActiveBody = null;
 
+                        // ターン交代
                         if (gameMode === 'multi') {
                             switchTurn();
                         } else {
@@ -774,6 +774,7 @@ function setupPhysicsEvents() {
                 }
             }
 
+            // 地面落下判定
             if ((bodyA.label === 'ground' && isBlockB) || (bodyB.label === 'ground' && isBlockA)) {
                 const droppedBlock = isBlockA ? bodyA : bodyB;
                 if (!droppedBlock.hasTouched) {
