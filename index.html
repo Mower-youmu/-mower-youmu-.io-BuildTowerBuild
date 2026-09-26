@@ -66,7 +66,7 @@
         .menu-btn.secondary { background: #2980b9; color: #fff; }
         .menu-btn.neutral { background: #444; color: #eee; }
 
-        /* ロビー画面（初期状態は非表示） */
+        /* ロビー画面 */
         #lobby-screen { display: none; }
         .lobby-panels {
             display: flex;
@@ -101,7 +101,8 @@
             background: #111;
             color: #fff;
             text-align: center;
-            font-size: 14px;
+            font-size: 16px;
+            letter-spacing: 2px;
         }
         .action-btn {
             padding: 9px 16px;
@@ -116,17 +117,35 @@
         .action-btn:hover { filter: brightness(1.1); }
         .room-id-box {
             margin-top: 12px;
-            padding: 8px;
+            padding: 10px;
             background: #111;
             border: 1px dashed #f39c12;
             border-radius: 6px;
         }
+        .room-id-val-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 6px 0;
+        }
         .room-id-box b {
-            display: block;
-            font-size: 15px;
+            font-size: 26px;
             color: #f39c12;
-            word-break: break-all;
-            margin: 4px 0;
+            letter-spacing: 4px;
+        }
+        .copy-btn {
+            padding: 4px 10px;
+            background: #444;
+            border: 1px solid #777;
+            color: #eee;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .copy-btn:hover {
+            background: #555;
+            color: #fff;
         }
         .hint { font-size: 10px; color: #888; margin: 2px 0 0 0; }
         .lobby-status-msg {
@@ -145,7 +164,7 @@
         }
         .text-link-btn:hover { color: #fff; text-decoration: underline; }
 
-        /* 遊び方モーダル（初期状態は非表示） */
+        /* 遊び方モーダル */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -448,18 +467,21 @@
     <div class="lobby-panels">
         <div class="lobby-card">
             <h3>部屋を作る (ホスト)</h3>
-            <p>合言葉を発行して対戦相手を待ちます。</p>
+            <p>4桁の合言葉を発行して対戦相手を待ちます。</p>
             <button id="btn-create-room" class="action-btn">部屋を作成</button>
             <div id="host-id-display" class="room-id-box" style="display:none;">
                 <span>あなたの部屋ID:</span>
-                <b id="my-peer-id">発行中...</b>
-                <p class="hint">この文字列をコピーして対戦相手に渡してください</p>
+                <div class="room-id-val-wrapper">
+                    <b id="my-peer-id">----</b>
+                    <button id="btn-copy-id" class="copy-btn">コピー</button>
+                </div>
+                <p class="hint">この4桁の数字を対戦相手に伝えてください</p>
             </div>
         </div>
         <div class="lobby-card">
             <h3>部屋に入る (ゲスト)</h3>
-            <p>教えてもらった合言葉を入力して接続します。</p>
-            <input type="text" id="input-room-id" placeholder="相手の部屋IDを入力">
+            <p>教えてもらった4桁の合言葉を入力して接続します。</p>
+            <input type="text" id="input-room-id" placeholder="例: 1234" maxlength="4">
             <button id="btn-join-room" class="action-btn">接続して参加</button>
         </div>
     </div>
