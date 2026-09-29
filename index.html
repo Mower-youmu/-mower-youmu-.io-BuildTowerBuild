@@ -2,12 +2,18 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>おうりょくタワービルド</title>
     <!-- Matter.js 物理ライブラリ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
     <!-- PeerJS P2P通信ライブラリ -->
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
+        * {
+            box-sizing: border-box;
+            -webkit-touch-callout: none;
+        }
+
         body {
             margin: 0;
             background: #1a1a1a;
@@ -23,7 +29,7 @@
         /* タイトル ＆ ロビー画面 */
         #title-screen, #lobby-screen {
             max-width: 620px;
-            margin: 50px auto;
+            margin: 40px auto;
             background: rgba(35, 35, 35, 0.95);
             border: 2px solid #555;
             border-radius: 16px;
@@ -145,10 +151,7 @@
             font-size: 12px;
             cursor: pointer;
         }
-        .copy-btn:hover {
-            background: #555;
-            color: #fff;
-        }
+        .copy-btn:hover { background: #555; color: #fff; }
         .hint { font-size: 10px; color: #888; margin: 2px 0 0 0; }
         .lobby-status-msg {
             margin: 15px 0 5px 0;
@@ -212,7 +215,7 @@
             padding-left: 20px;
         }
 
-        /* ゲームメイン画面 */
+        /* ゲームメイン画面（PC標準） */
         #info {
             padding: 8px;
             background: #2a2a2a;
@@ -335,6 +338,7 @@
 
         #main-canvas-container {
             position: relative;
+            touch-action: none;
         }
         canvas.main-cv {
             display: block;
@@ -342,6 +346,7 @@
             border-radius: 8px;
             background: #87CEEB;
             cursor: crosshair;
+            touch-action: none;
         }
 
         #turn-timer-display {
@@ -449,6 +454,11 @@
             background: linear-gradient(to right, #2980b9, #2ecc71, #f1c40f, #e74c3c);
         }
 
+        /* スマホ用コントロールバー（PCでは非表示） */
+        #mobile-control-bar {
+            display: none;
+        }
+
         /* バージョン表記バッジ（右下固定） */
         #version-badge {
             position: fixed;
@@ -462,6 +472,125 @@
             border-radius: 4px;
             pointer-events: none;
             z-index: 999;
+        }
+
+        /* ====================================================
+           📱 スマホ・縦画面レイアウト（9:16 最適化）
+        ==================================================== */
+        @media screen and (max-width: 768px) {
+            #title-screen, #lobby-screen {
+                width: 92%;
+                margin: 20px auto;
+                padding: 20px 15px;
+            }
+            .lobby-panels {
+                flex-direction: column;
+            }
+
+            #game-layout {
+                flex-direction: column;
+                align-items: center;
+                width: 100vw;
+                margin: 0;
+                gap: 0;
+            }
+
+            /* スマホではPC用の両サイドパネルを隠す */
+            .side-panel {
+                display: none;
+            }
+
+            #info {
+                padding: 6px 10px;
+                font-size: 12px;
+                justify-content: space-between;
+                width: 100vw;
+            }
+
+            /* キャンバスを9:16縦長スマホの横幅いっぱいにフィット */
+            #main-canvas-container {
+                width: 100vw;
+                max-width: 480px;
+                display: flex;
+                justify-content: center;
+            }
+            canvas.main-cv {
+                width: 95vw !important;
+                height: 95vw !important;
+                max-width: 420px;
+                max-height: 420px;
+                border-width: 2px;
+            }
+
+            /* スマホ用 下部コントロールUIを表示 */
+            #mobile-control-bar {
+                display: flex;
+                width: 95vw;
+                max-width: 420px;
+                margin: 10px auto 0 auto;
+                justify-content: space-between;
+                align-items: center;
+                background: rgba(35, 35, 35, 0.9);
+                border: 1px solid #444;
+                border-radius: 12px;
+                padding: 8px 12px;
+                touch-action: none;
+            }
+
+            .mobile-next-box {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                font-size: 11px;
+                color: #aaa;
+            }
+            #mobile-next-canvas {
+                width: 50px;
+                height: 50px;
+                background: #222;
+                border: 1px solid #555;
+                border-radius: 6px;
+                margin-top: 3px;
+            }
+
+            .mobile-score-box {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            .mobile-score-val {
+                font-size: 22px;
+                font-weight: bold;
+                color: #f39c12;
+            }
+            .mobile-stat-text {
+                font-size: 10px;
+                color: #aaa;
+            }
+
+            /* 大型回転ボタン（長押し対応） */
+            #btn-rotate-hold {
+                width: 58px;
+                height: 58px;
+                border-radius: 50%;
+                background: #2980b9;
+                border: 2px solid #3498db;
+                color: #fff;
+                font-size: 24px;
+                font-weight: bold;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                cursor: pointer;
+                user-select: none;
+                touch-action: none;
+                box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+                
+            }
+            #btn-rotate-hold:active {
+                background: #1abc9c;
+                transform: scale(0.95);
+            }
         }
     </style>
 </head>
@@ -515,9 +644,8 @@
                 <br>AnimalとかFruitsを落としてきたでしょうし。</h4>
             <h4>【基本操作】</h4>
             <ul>
-                <li><b>マウス移動:</b> 落下位置を水平に移動</li>
-                <li><b>ホイール回転:</b> オブジェクトを30度刻みで回転</li>
-                <li><b>左クリック:</b> 資材を落下</li>
+                <li><b>PC:</b> マウス移動で狙う / クリックで投下 / ホイールで回転</li>
+                <li><b>スマホ:</b> 画面スライドで狙う / <b>指を離して落下</b> / <b>右下ボタン長押しで回転</b></li>
                 <li><b>[R] キー:</b> いつでもリセット / <b>[A]+[C] 3秒長押し:</b> ランキング初期化</li>
             </ul>
 
@@ -529,7 +657,7 @@
                     <br><b>本ゲームは高さと重量でスコアが加算されます</b></li>
                 <li><b>リアルタイムでシミュってる？のでスコアは大体変動してます</b>
                     <br>是非緊張してくだxi</li>
-                <li><b>自滅ペナルティ:</b> わざと画面外へ落とした場合は<b>負け犬</b>
+                <li><b>自滅ペナルティ:</b> わざと画面外へ落とした場合は<b>負け</b>
                 <br><b>スコアを確定させる為に自滅する。これ、恥ずかしいですからね</b></li>
             </ul>
 
@@ -544,8 +672,8 @@
                 <li><b>ソロと基本は同じなのですよ……？</b></li>
                 <li><b>1つの盤面に交互に落とすターン制サドンデス？</b></li>
                 <li><b>1ターン制限時間: 15秒</b>（時間切れ時は強制投下、就活のように無慈悲...）</li>
-                <li><b>自分のターン中にタワーを崩壊させたら負け犬</b></li>
-                <li>相手が負け犬になったら<b>人生の勝利者</b></li>
+                <li><b>自分のターン中にタワーを崩壊させたら負け</b></li>
+                <li>相手が負けになったら<b>人生の勝利者</b></li>
             </ul>
         </div>
         <div style="text-align:center; margin-top: 15px;">
@@ -558,10 +686,12 @@
 <div id="game-view" style="display:none;">
     <div id="info">
         <span id="turn-banner" style="display:none;" class="turn-banner">準備中...</span>
-         <b>おうりょくタワービルド</b> | <button id="btn-back-to-title" class="sub-btn">タイトルへ戻る</button>
+        <b>おうりょくタワービルド</b>
+        <button id="btn-back-to-title" class="sub-btn">タイトルへ戻る</button>
     </div>
 
     <div id="game-layout">
+        <!-- PC用 左パネル -->
         <div class="side-panel">
             <div class="ui-card">
                 <h3>SCORE</h3>
@@ -578,6 +708,7 @@
             </div>
         </div>
 
+        <!-- 中央 メインキャンバス -->
         <div id="main-canvas-container">
             <div id="turn-timer-display" style="display:none;">残り時間: <span id="turn-timer-sec">15</span>s</div>
 
@@ -597,6 +728,7 @@
             </div>
         </div>
 
+        <!-- PC用 右パネル -->
         <div class="side-panel">
             <div class="ui-card">
                 <h3>NEXT</h3>
@@ -637,10 +769,23 @@
             </div>
         </div>
     </div>
+
+    <!-- スマホ専用 コントロールフッター -->
+    <div id="mobile-control-bar">
+        <div class="mobile-next-box">
+            <span>NEXT</span>
+            <canvas id="mobile-next-canvas" width="50" height="50"></canvas>
+        </div>
+        <div class="mobile-score-box">
+            <div id="mobile-score-val" class="mobile-score-val">0</div>
+            <div class="mobile-stat-text">H: <span id="mobile-stat-h">0</span>px / <span id="mobile-stat-w">0</span>kg</div>
+        </div>
+        <div id="btn-rotate-hold" title="長押しで回転">↻</div>
+    </div>
 </div>
 
 <!-- バージョン表示バッジ -->
-<div id="version-badge">HTML: v1.0.4 / JS: <span id="js-version-display">---</span></div>
+<div id="version-badge">HTML: v1.0.7 / JS: <span id="js-version-display">---</span></div>
 
 <!-- JavaScript読み込み -->
 <script src="script.js"></script>
