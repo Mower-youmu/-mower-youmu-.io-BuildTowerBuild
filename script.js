@@ -1,7 +1,7 @@
 // ==========================================
 // バージョン管理
 // ==========================================
-const JS_VERSION = 'v1.0.6';
+const JS_VERSION = 'v1.0.8';
 const jsVerEl = document.getElementById('js-version-display');
 if (jsVerEl) jsVerEl.textContent = JS_VERSION;
 
@@ -452,9 +452,7 @@ function initPhysics() {
     currentScore = 0;
     landedBlocks = [];
 
-    document.getElementById('score').textContent = '0';
-    document.getElementById('stat-height').textContent = '0';
-    document.getElementById('stat-weight').textContent = '0';
+    updateScoreDisplay(0, 0, 0);
 
     nextType = getRandomType();
     drawNextPreview();
@@ -559,16 +557,23 @@ function cleanupPhysics() {
 }
 
 // ==========================================
-// 入力 & 描画イベント
+// 入力 & 描画イベント（タッチ・ドラッグ対応）
 // ==========================================
 let lastCursorSendTime = 0;
+let isDraggingTouch = false;
 
 function setupCanvasInput() {
     const targetCanvas = isHost ? render.canvas : guestCanvas;
 
-    targetCanvas.addEventListener('mousemove', (e) => {
+    function getCanvasX(clientX) {
         const rect = targetCanvas.getBoundingClientRect();
-        mouseX = e.clientX - rect.left;
+        const scaleX = targetCanvas.width / rect.width;
+        return (clientX - rect.left) * scaleX;
+    }
+
+    // --- PC マウス操作 ---
+    targetCanvas.addEventListener('mousemove', (e) => {
+        mouseX = getCanvasX(e.clientX);
         isMouseInCanvas = true;
 
         const now = Date.now();
@@ -598,18 +603,94 @@ function setupCanvasInput() {
     }, { passive: false });
 
     targetCanvas.addEventListener('click', (e) => {
+        // タッチ操作後の click 誤爆を防止
+        if (isDraggingTouch) return;
         if (isGameOver || !canDrop || !isMyTurn()) return;
 
-        const rect = targetCanvas.getBoundingClientRect();
-        const dropX = e.clientX - rect.left;
+        const dropX = getCanvasX(e.clientX);
+        triggerDropAction(dropX);
+    });
 
-        if (gameMode === 'solo' || isHost) {
-            executeDrop(dropX, currentAngle);
-        } else {
-            canDrop = false;
-            p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle, shapeType: nextType });
+    // --- 📱 スマホ タッチ操作（ドラッグで狙って離して落とす） ---
+    targetCanvas.addEventListener('touchstart', (e) => {
+        if (!isMyTurn() || !canDrop || isGameOver) return;
+        isDraggingTouch = true;
+        isMouseInCanvas = true;
+
+        const touch = e.touches[0];
+        mouseX = getCanvasX(touch.clientX);
+
+        if (gameMode === 'multi' && p2pConn && p2pConn.open) {
+            p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: true });
+        }
+    }, { passive: true });
+
+    targetCanvas.addEventListener('touchmove', (e) => {
+        if (!isDraggingTouch) return;
+        const touch = e.touches[0];
+        mouseX = getCanvasX(touch.clientX);
+
+        const now = Date.now();
+        if (gameMode === 'multi' && p2pConn && p2pConn.open && (now - lastCursorSendTime > 35)) {
+            lastCursorSendTime = now;
+            p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: true });
+        }
+    }, { passive: true });
+
+    targetCanvas.addEventListener('touchend', (e) => {
+        if (!isDraggingTouch) return;
+        isDraggingTouch = false;
+
+        if (isGameOver || !canDrop || !isMyTurn()) return;
+
+        // 指を離した位置へ落下
+        triggerDropAction(mouseX);
+        isMouseInCanvas = false;
+
+        if (gameMode === 'multi' && p2pConn && p2pConn.open) {
+            p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: false });
         }
     });
+}
+
+function triggerDropAction(dropX) {
+    if (gameMode === 'solo' || isHost) {
+        executeDrop(dropX, currentAngle);
+    } else {
+        canDrop = false;
+        p2pConn.send({ type: 'request_drop', x: dropX, angle: currentAngle, shapeType: nextType });
+    }
+}
+
+// --- 📱 スマホ専用 回転ボタン（長押しで連続回転） ---
+const rotateBtn = document.getElementById('btn-rotate-hold');
+let rotateHoldTimer = null;
+
+function stepRotate() {
+    if (!isMyTurn() || !canDrop || isGameOver) return;
+    currentAngle += Math.PI / 12; // 長押し時は15度ずつ滑らかに回転
+    if (gameMode === 'multi' && p2pConn && p2pConn.open) {
+        p2pConn.send({ type: 'cursor', x: mouseX, angle: currentAngle, inCanvas: isMouseInCanvas });
+    }
+}
+
+if (rotateBtn) {
+    function startRotation(e) {
+        e.preventDefault();
+        stepRotate();
+        clearInterval(rotateHoldTimer);
+        rotateHoldTimer = setInterval(stepRotate, 70); // 70ms毎に連続回転
+    }
+
+    function stopRotation() {
+        clearInterval(rotateHoldTimer);
+        rotateHoldTimer = null;
+    }
+
+    rotateBtn.addEventListener('pointerdown', startRotation);
+    rotateBtn.addEventListener('pointerup', stopRotation);
+    rotateBtn.addEventListener('pointerleave', stopRotation);
+    rotateBtn.addEventListener('pointercancel', stopRotation);
 }
 
 function executeDrop(x, angle) {
@@ -677,6 +758,20 @@ function renderGuides(mainCtx) {
     }
 }
 
+function updateScoreDisplay(score, h, w) {
+    // PC用
+    document.getElementById('score').textContent = score;
+    document.getElementById('stat-height').textContent = h;
+    document.getElementById('stat-weight').textContent = w;
+    // スマホ用
+    const mScore = document.getElementById('mobile-score-val');
+    const mH = document.getElementById('mobile-stat-h');
+    const mW = document.getElementById('mobile-stat-w');
+    if (mScore) mScore.textContent = score;
+    if (mH) mH.textContent = h;
+    if (mW) mW.textContent = w;
+}
+
 // ==========================================
 // 物理更新 ＆ 同期送信
 // ==========================================
@@ -717,13 +812,9 @@ function setupPhysicsEvents() {
             const totalWeight = activeLandedBlocks.reduce((sum, body) => sum + (body.weightVal || 10), 0);
             currentScore = Math.floor(towerHeight * (totalWeight / 10) * 0.2);
 
-            document.getElementById('stat-height').textContent = towerHeight;
-            document.getElementById('stat-weight').textContent = totalWeight;
-            document.getElementById('score').textContent = currentScore;
+            updateScoreDisplay(currentScore, towerHeight, totalWeight);
         } else {
-            document.getElementById('stat-height').textContent = '0';
-            document.getElementById('stat-weight').textContent = '0';
-            document.getElementById('score').textContent = '0';
+            updateScoreDisplay(0, 0, 0);
             currentScore = 0;
         }
 
@@ -772,14 +863,12 @@ function setupPhysicsEvents() {
                             landedBlocks.push(currentActiveBody);
                         }
 
-                        // ★ 接触即交代ではなく、静止・安定するまでのディレイを挟む（床落下判定を優先させる）
                         const bodyToSettle = currentActiveBody;
                         currentActiveBody = null;
 
                         clearTimeout(turnSwitchTimeout);
                         turnSwitchTimeout = setTimeout(() => {
                             if (isGameOver) return;
-                            // まだ盤上に残っている場合のみ安全にターン交代
                             if (bodyToSettle.position.y < 570) {
                                 if (gameMode === 'multi') {
                                     switchTurn();
@@ -789,7 +878,7 @@ function setupPhysicsEvents() {
                                     drawNextPreview();
                                 }
                             }
-                        }, 500); // 0.5秒の猶予を持たせる
+                        }, 500);
                     }
                 }
             }
@@ -818,7 +907,7 @@ function triggerSelfDestructGameOver() {
     clearTimeout(turnSwitchTimeout);
 
     currentScore = 0;
-    document.getElementById('score').textContent = '0';
+    updateScoreDisplay(0, 0, 0);
     document.getElementById('final-score').textContent = '0';
 
     if (gameMode === 'multi') {
@@ -846,18 +935,17 @@ function triggerGameOver() {
     clearTimeout(turnSwitchTimeout);
 
     if (gameMode === 'multi') {
-        // 床に触れたその瞬間の手番プレイヤーが敗者
         const loser = currentTurn;
         const amILoser = (loser === 'host' && isHost) || (loser === 'guest' && !isHost);
 
         document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
-        document.getElementById('game-over-msg').textContent = amILoser ? '負け犬' : '人生の勝利者';
+        document.getElementById('game-over-msg').textContent = amILoser ? '負け' : '人生の勝利者';
 
         if (p2pConn && p2pConn.open && isHost) {
             p2pConn.send({ type: 'game_over', selfDestruct: false, loser: loser, finalScore: currentScore });
         }
     } else {
-        document.getElementById('game-over-title').textContent = '負け犬';
+        document.getElementById('game-over-title').textContent = '負け';
         document.getElementById('game-over-msg').textContent = 'Dead Parrot';
         addScoreToRanking(currentScore);
     }
@@ -873,7 +961,6 @@ function handleRemoteGameOver(data) {
     clearTimeout(turnSwitchTimeout);
 
     const amILoser = (data.loser === 'host' && isHost) || (data.loser === 'guest' && !isHost);
-    
     document.getElementById('game-over-title').textContent = amILoser ? 'Dead Parrot' : 'Winner!';
     
     if (data.selfDestruct) {
@@ -895,9 +982,7 @@ function applyRemoteState(data) {
         drawNextPreview();
     }
 
-    document.getElementById('score').textContent = data.score || 0;
-    document.getElementById('stat-height').textContent = data.height || 0;
-    document.getElementById('stat-weight').textContent = data.weight || 0;
+    updateScoreDisplay(data.score || 0, data.height || 0, data.weight || 0);
 
     guestCtx.fillStyle = '#87CEEB';
     guestCtx.fillRect(0, 0, width, height);
@@ -953,15 +1038,30 @@ document.getElementById('retry-btn').addEventListener('click', () => {
 // ==========================================
 const nextCanvas = document.getElementById('next-canvas');
 const nextCtx = nextCanvas.getContext('2d');
+const mobileNextCanvas = document.getElementById('mobile-next-canvas');
+const mobileNextCtx = mobileNextCanvas ? mobileNextCanvas.getContext('2d') : null;
 
 function drawNextPreview() {
+    const def = shapeDefs[nextType] || shapeDefs.box;
+
+    // PC用プレビュー
     nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
     nextCtx.save();
     nextCtx.translate(nextCanvas.width / 2, nextCanvas.height / 2);
-    const def = shapeDefs[nextType] || shapeDefs.box;
     nextCtx.fillStyle = def.color;
     def.draw(nextCtx);
     nextCtx.restore();
+
+    // スマホ用小型プレビュー
+    if (mobileNextCtx) {
+        mobileNextCtx.clearRect(0, 0, mobileNextCanvas.width, mobileNextCanvas.height);
+        mobileNextCtx.save();
+        mobileNextCtx.translate(mobileNextCanvas.width / 2, mobileNextCanvas.height / 2);
+        mobileNextCtx.scale(0.55, 0.55); // 小型化
+        mobileNextCtx.fillStyle = def.color;
+        def.draw(mobileNextCtx);
+        mobileNextCtx.restore();
+    }
 }
 
 function getRanking() {
@@ -979,6 +1079,7 @@ function saveRanking(ranking) {
 function updateRankingUI(currentFinalScore = null) {
     const ranking = getRanking();
     const listEl = document.getElementById('ranking-list');
+    if (!listEl) return;
     listEl.innerHTML = '';
 
     ranking.forEach((sc, idx) => {
